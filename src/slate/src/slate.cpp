@@ -1713,9 +1713,12 @@ namespace {
         const char* empty_title = friends_only ? "No friends are currently tracked." : "No players are currently tracked.";
         const char* no_match_title = friends_only ? "No friends match your search." : "No players match your search.";
 
+        const float directory_gap = 8.f ds;
+        const float directory_column_width = (GetContentRegionAvail().x - directory_gap) * 0.5f;
+
         BeginGroup();
         {
-            widgets->child.begin(I_USER__COG, list_title, 1, { 318 ds, 414 ds });
+            widgets->child.begin(I_USER__COG, list_title, 1, { directory_column_width, 312 ds });
             {
                 widgets->textinput("##player_directory_search", ui_state.search, sizeof(ui_state.search), { .icon = I_SEARCH, .hint = search_hint });
                 widgets->spacing(6 ds);
@@ -1727,7 +1730,7 @@ namespace {
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##player_directory_entries", { 0, 346 ds }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##player_directory_entries", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& entity : filtered_players) {
                         const bool is_selected = has_selected_player &&
                             (selected_player.Id == entity.Id || selected_player.Ped == entity.Ped);
@@ -1774,11 +1777,11 @@ namespace {
         }
         EndGroup();
 
-        SameLine(0, 8.f ds);
+        SameLine(0, directory_gap);
 
         BeginGroup();
         {
-            widgets->child.begin("", friends_only ? "Selected Friend" : "Selected Player", 2, { 186 ds, 414 ds });
+            widgets->child.begin("", friends_only ? "Selected Friend" : "Selected Player", 2, { directory_column_width, 312 ds });
             {
                 if (!has_selected_player) {
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
@@ -1797,7 +1800,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -1853,7 +1856,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -2526,12 +2529,7 @@ namespace {
         int value_count,
         const ped_hitbox_point_t* points,
         int point_count,
-        bool selector_active,
-        bool show_fov = false,
-        int fov_x = 0,
-        int fov_y = 0,
-        bool fov_filled = false,
-        ImColor fov_color = ImColor(255, 255, 255, 255)) {
+        bool selector_active) {
         auto* window = GetCurrentWindow();
         auto* draw = window->DrawList;
 
@@ -2579,55 +2577,6 @@ namespace {
             draw->AddImage(ped_hitbox_photo, ped_rect.Min, ped_rect.Max, uv_min, uv_max, g_style->col(pcol_text, 0.96f));
         } else {
             draw_ped_hitbox_fallback(draw, image_area);
-        }
-
-        if (show_fov && fov_x > 0 && fov_y > 0) {
-            const ImVec2 center = ped_rect.GetCenter();
-            const float radius_x = ImClamp(
-                image_area.GetWidth() * (static_cast<float>(fov_x) / 500.0f),
-                8.0f,
-                image_area.GetWidth() * 0.95f);
-            const float radius_y = ImClamp(
-                image_area.GetHeight() * (static_cast<float>(fov_y) / 500.0f),
-                8.0f,
-                image_area.GetHeight() * 0.95f);
-
-            const ImVec4 color = ImVec4(
-                fov_color.Value.x,
-                fov_color.Value.y,
-                fov_color.Value.z,
-                fov_color.Value.w * GImGui->Style.Alpha);
-
-            if (fov_filled) {
-                draw->AddEllipseFilled(
-                    center,
-                    ImVec2{ radius_x, radius_y },
-                    GetColorU32(ImVec4{ color.x, color.y, color.z, color.w * 0.18f }),
-                    0.0f,
-                    64);
-            }
-
-            draw->AddEllipse(
-                center,
-                ImVec2{ radius_x, radius_y },
-                GetColorU32(color),
-                0.0f,
-                64,
-                2.0f);
-
-            // Show the actual selected aim point relative to the FOV center.
-            for (int i = 0; i < point_count; ++i) {
-                if (!values[points[i].value_index]) {
-                    continue;
-                }
-
-                const ImVec2 target{
-                    ped_rect.Min.x + ped_rect.GetWidth() * points[i].x,
-                    ped_rect.Min.y + ped_rect.GetHeight() * points[i].y
-                };
-                draw->AddLine(center, target, GetColorU32(color), 1.5f);
-                break;
-            }
         }
 
         bool hovered_points[12]{ };
@@ -4904,9 +4853,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     sunketsware_visuals_enabled = false;
                     Core::Features::SunketsWareVisuals::SetEnabled(false);
                 }
-                widgets->checkbox(I_USER__COG, "Show LocalPlayer", &g_Config.ESP->ShowLocalPlayer);
                 widgets->checkbox(I_MOOD__SILENCE, "Ignore Death", &g_Config.ESP->IgnoreDead);
                 widgets->checkbox(I_USER__COG, "Ignore NPCs", &g_Config.ESP->IgnoreNPCs);
+                widgets->checkbox(I_PAW, "Ignore Animals", &g_Config.ESP->IgnoreAnimals);
                 widgets->checkbox(I_EYE, "Highlight Visible", &g_Config.ESP->HighlightVisible);
                 if (g_Config.ESP->HighlightVisible) {
                     widgets->checkbox(I_USER__OFF, "Ignore Local Body", &g_Config.ESP->IgnoreLocalPed);
@@ -5150,6 +5099,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         static char vehicle_search[64]{};
         static uintptr_t selected_vehicle_ptr = 0;
 
+        const float vehicle_directory_gap = 8.f ds;
+        const float vehicle_directory_column_width = (GetContentRegionAvail().x - vehicle_directory_gap) * 0.5f;
+
         const auto all_vehicles = collect_vehicle_directory_entries();
         auto filtered_vehicles = all_vehicles;
         filter_vehicle_directory_entries(filtered_vehicles, vehicle_search);
@@ -5167,7 +5119,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         BeginGroup();
         {
-            widgets->child.begin(I_CAR, "Vehicles", 1, { 270 ds, 414 ds });
+            widgets->child.begin(I_CAR, "Vehicles", 1, { vehicle_directory_column_width, 312 ds });
             {
                 widgets->textinput("##vehicle_directory_search", vehicle_search, sizeof(vehicle_search), { .icon = I_SEARCH, .hint = "Search vehicles..." });
                 widgets->spacing(6 ds);
@@ -5184,7 +5136,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##vehicle_directory_entries", { 0, 346 ds }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##vehicle_directory_entries", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& vehicle : filtered_vehicles) {
                         const bool is_selected = has_selected_vehicle && selected_vehicle.Pointer == vehicle.Pointer;
                         const bool locked = is_vehicle_locked(vehicle);
@@ -5219,11 +5171,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         }
         EndGroup();
 
-        SameLine(0, 8.f ds);
+        SameLine(0, vehicle_directory_gap);
 
         BeginGroup();
         {
-            widgets->child.begin("", "Selected Vehicle", 2, { 234 ds, 414 ds });
+            widgets->child.begin("", "Selected Vehicle", 2, { vehicle_directory_column_width, 312 ds });
             {
                 if (!has_selected_vehicle) {
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
@@ -5247,7 +5199,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, 210 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         if (all_vehicles.empty()) {
                             draw_player_empty_state(I_CAR, "No Actions", "Vehicle actions unlock when a streamed vehicle exists.");
@@ -5307,7 +5259,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, 210 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -5769,103 +5721,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         });
 
     widgets->nav.addpage(5, [&] {
-        auto& config_ui = get_config_browser_ui_state();
-        refresh_config_browser_cloud_catalog();
-        const auto config_catalog = get_config_browser_catalog_snapshot();
-        const auto filtered_configs = collect_config_browser_entries(
-            config_catalog,
-            config_ui.sort_mode,
-            config_ui.search,
-            config_ui.filter_esp,
-            config_ui.filter_silentaim,
-            config_ui.filter_aimbot,
-            config_ui.filter_triggerbot);
-        const int total_config_count = static_cast<int>(config_catalog.size());
-        const int visible_config_count = static_cast<int>(filtered_configs.size());
-        bool cloud_loading = false;
-        bool cloud_ready = false;
-        std::string cloud_error;
-        get_config_browser_cloud_status(cloud_loading, cloud_ready, cloud_error);
-        const float config_browser_width = GetContentRegionAvail().x;
-        widgets->child.begin(I_FOLDER__COG, "Config Browser", 1, { config_browser_width, 414 ds });
-        {
-            const std::string status_label = config_ui.preview_active
-                ? "Using: " + config_ui.preview_config_name
-                : (cloud_loading ? "Loading site configs..." : (cloud_ready ? "Site configs loaded" : "Waiting for site configs"));
-
-            PushStyleColor(ImGuiCol_Text, (config_ui.preview_active || cloud_ready) ? g_style->col(pcol_scheme).vec4() : g_style->col(pcol_text2).vec4());
-            TextUnformatted(status_label.c_str());
-            PopStyleColor();
-            if (!cloud_error.empty() && !cloud_ready) {
-                PushStyleColor(ImGuiCol_Text, g_style->col(pcol_text2).vec4());
-                const std::string cloud_error_label = format_cloud_config_error(cloud_error);
-                TextWrapped("Cloud: %s", cloud_error_label.c_str());
-                PopStyleColor();
-
-                if (is_cloud_config_auth_error(cloud_error)) {
-                    static const std::string hwid = auth::get_hwid();
-                    PushStyleColor(ImGuiCol_Text, g_style->col(pcol_text2).vec4());
-                    TextWrapped("HWID: %s", hwid.c_str());
-                    PopStyleColor();
-
-                    widgets->spacing(4 ds);
-                    if (widgets->button("Copy HWID", { 116 ds, 28 ds })) {
-                        Utils::PasteClipboard(hwid.c_str());
-                        NotifyManager::Send("HWID copied", 220.0f);
-                    }
-                }
-            }
-
-            widgets->spacing(8 ds);
-            widgets->textinput("Config Search", config_ui.search, sizeof(config_ui.search), {
-                .padding = vec2{ 10, 10 },
-                .icon = I_SEARCH,
-                .hint = "Search config names...",
-                .size = vec2{ 0, 0 }
-                });
-
-            widgets->spacing(8 ds);
-            PushStyleColor(ImGuiCol_Text, g_style->col(pcol_text2).vec4());
-            Text("%d shown / %d total", visible_config_count, total_config_count);
-            PopStyleColor();
-
-            widgets->spacing(8 ds);
-            widgets->separator();
-            widgets->spacing(8 ds);
-
-            if (filtered_configs.empty()) {
-                if (cloud_loading) {
-                    draw_player_empty_state(I_FOLDER__COG, "Loading", "Fetching your site configs.");
-                }
-                else if (config_ui.sort_mode == config_sort_my_configs) {
-                    draw_player_empty_state(I_FOLDER__COG, "No Configs", "No owned configs match the current filters.");
-                }
-                else {
-                    draw_player_empty_state(I_FOLDER__COG, "No Match", "Try a different name or feature filter.");
-                }
-            }
-            else {
-                for (const auto* entry : filtered_configs) {
-                    PushID(entry->id.c_str());
-                    const bool is_entry_active = entry->is_active_slot || (config_ui.preview_active && config_ui.preview_config_id == entry->id);
-                    const auto action = draw_config_entry_card(*entry, is_entry_active);
-                    if (action == config_entry_action_t::import_slot) {
-                        if (entry->uses_exploits) {
-                            open_config_exploit_warning(config_ui, *entry);
-                        }
-                        else {
-                            apply_config_browser_config(config_ui, *entry);
-                        }
-                    }
-                    else if (action == config_entry_action_t::save_slot) {
-                        save_current_config_to_cloud_slot(config_ui, *entry);
-                    }
-                    PopID();
-                    widgets->spacing(6 ds);
-                }
-            }
-        }
-        widgets->child.end();
+        // Config browser is intentionally empty until the local-config
+        // rewrite is ready. Cloud config UI and filters have been removed.
         });
 
     widgets->nav.addpage(6, [&] {
@@ -6055,7 +5912,6 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
             ImVec2 menu_size;
             bool show_visual_preview = false;
             bool show_hitbox_selector = false;
-            bool show_config_filter_panel = false;
             int combat_subtab = 0;
             const bool menu_warmed_up = (GetTickCount64() - menu_opened_at) >= 600;
 
@@ -6074,7 +5930,6 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                 menu_size = GetWindowSize();
                 show_visual_preview = menu_warmed_up && widgets->nav.current == 1;
                 show_hitbox_selector = menu_warmed_up && widgets->nav.current == 0;
-                show_config_filter_panel = menu_warmed_up && widgets->nav.current == 5;
                 combat_subtab = widgets->nav.tabs[0].current;
                 show_hitbox_selector = show_hitbox_selector && (combat_subtab == 0 || combat_subtab == 1);
                 g_search->initialize();
@@ -6148,7 +6003,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                         widgets->nav.drawsubtabs();
                         constexpr const char* search_hint = "Search Features";
                         const float search_hint_width = CalcTextSize(search_hint).x;
-                        SetCursorPos({ GetWindowWidth() - 44 ds - search_hint_width, 22 ds });
+                        SetCursorPos({ GetWindowWidth() - 49 ds - search_hint_width, 22 ds });
                         g_style->push(pcol_bg3, g_style->col(pcol_bg3, 0));
                         g_style->push(pcol_border, g_style->col(pcol_border, 0));
                         widgets->textinput("##searchbar", g_search->buf, sizeof(g_search->buf), { .padding = vec2{ 0, 0 }, .icon = I_SEARCH, .hint = search_hint, .size = ImVec2{ search_hint_width + 24 ds, 16 ds }, .bgcol = pcolor(0, 0, 0, 0), .rounding = 0 ds });
@@ -6273,12 +6128,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                                 IM_ARRAYSIZE(aimbot_selector_values),
                                 aimbot_hitbox_points,
                                 IM_ARRAYSIZE(aimbot_hitbox_points),
-                                g_Config.Aimbot->Enabled,
-                                g_Config.Aimbot->ShowFov,
-                                g_Config.Aimbot->FOVX,
-                                g_Config.Aimbot->FOVY,
-                                g_Config.Aimbot->FovFilled,
-                                g_Config.Aimbot->FovColor);
+                                g_Config.Aimbot->Enabled);
 
                             g_Config.Aimbot->BoneGroup_Head = aimbot_selector_values[0];
                             g_Config.Aimbot->BoneGroup_Neck = aimbot_selector_values[1];
@@ -6303,12 +6153,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                                 IM_ARRAYSIZE(silentaim_selector_values),
                                 silentaim_hitbox_points,
                                 IM_ARRAYSIZE(silentaim_hitbox_points),
-                                g_Config.SilentAim->Enabled,
-                                g_Config.SilentAim->ShowFov,
-                                g_Config.SilentAim->FOVX,
-                                g_Config.SilentAim->FOVY,
-                                g_Config.SilentAim->FovFilled,
-                                g_Config.SilentAim->FovColor);
+                                g_Config.SilentAim->Enabled);
 
                             g_Config.SilentAim->BoneGroup_Head = silentaim_selector_values[0];
                             g_Config.SilentAim->BoneGroup_Neck = silentaim_selector_values[1];
@@ -6325,135 +6170,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                 widgets->window.end();
             }
 
-            if (show_config_filter_panel) {
-                auto& config_ui = get_config_browser_ui_state();
-                refresh_config_browser_cloud_catalog();
-                const auto config_catalog = get_config_browser_catalog_snapshot();
-                const auto filtered_configs = collect_config_browser_entries(
-                    config_catalog,
-                    config_ui.sort_mode,
-                    config_ui.search,
-                    config_ui.filter_esp,
-                    config_ui.filter_silentaim,
-                    config_ui.filter_aimbot,
-                    config_ui.filter_triggerbot);
-                const int total_config_count = static_cast<int>(config_catalog.size());
-                const int visible_config_count = static_cast<int>(filtered_configs.size());
-                const int active_filter_count = get_config_browser_active_filter_count(config_ui);
-                const ImVec2 filter_size{ 228 ds, menu_size.y };
-                const ImVec2 filter_pos = menu_pos + ImVec2{ menu_size.x + 10 ds, 0 };
 
-                SetNextWindowPos(filter_pos, ImGuiCond_Always);
-                widgets->window.begin("config_filters_external", filter_size, ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-                {
-                    g_shadertoy->bg(GetWindowDrawList(), GetWindowPos(), GetWindowPos() + GetWindowSize(), g_style->col(pcol_backdrop), GImGui->Style.WindowRounding);
-
-                    PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 14, 14 });
-                    BeginChild("config_filters_header", vec2{ 0, 40 ds }, 2, 128 | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-                    {
-                        SetCursorPosY(12 ds);
-                        PushFont(fonts[icons].get(16));
-                        TextColored(g_style->col(pcol_scheme), I_ADJUSTMENTS__HORIZONTAL);
-                        PopFont();
-                        SameLine(0, 8 ds);
-                        Text("Config Filters");
-                    }
-                    EndChild();
-
-                    widgets->spacing(0 ds);
-                    BeginChild("config_filters_content", vec2{ 0, 0 }, 2, 128 | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-                    {
-                        PushStyleColor(ImGuiCol_Text, config_ui.preview_active ? g_style->col(pcol_scheme).vec4() : g_style->col(pcol_text2).vec4());
-                        TextUnformatted(config_ui.preview_active ? "Site config active" : "No site config selected");
-                        PopStyleColor();
-
-                        if (config_ui.preview_active) {
-                            widgets->spacing(4 ds);
-                            TextWrapped("%s", config_ui.preview_config_name.c_str());
-                            if (!config_ui.main_config_snapshot.empty()) {
-                                widgets->spacing(8 ds);
-
-                                PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
-                                PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
-                                PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
-                                PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.30f).vec4());
-                                if (widgets->button("Back to main", { GetContentRegionAvail().x, 30 ds })) {
-                                    restore_config_browser_main(config_ui);
-                                }
-                                PopStyleColor(3);
-                                PopStyleVar();
-                            }
-                        }
-
-                        widgets->spacing(10 ds);
-                        widgets->separator();
-                        widgets->spacing(8 ds);
-
-                        TextDisabled("Configs");
-                        Text("%d shown / %d total", visible_config_count, total_config_count);
-
-                        widgets->spacing(8 ds);
-                        TextDisabled("Sort Order");
-                        widgets->spacing(6 ds);
-
-                        const float panel_width = GetContentRegionAvail().x;
-                        if (widgets->selectable("My Configs", config_ui.sort_mode == config_sort_my_configs, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_FOLDER__COG })) {
-                            config_ui.sort_mode = config_sort_my_configs;
-                        }
-                        widgets->spacing(4 ds);
-                        if (widgets->selectable("Trending", config_ui.sort_mode == config_sort_trending, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_WAVE__SAW__TOOL })) {
-                            config_ui.sort_mode = config_sort_trending;
-                        }
-                        widgets->spacing(4 ds);
-                        if (widgets->selectable("Latest", config_ui.sort_mode == config_sort_latest, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_CLOCK })) {
-                            config_ui.sort_mode = config_sort_latest;
-                        }
-
-                        widgets->spacing(10 ds);
-                        widgets->separator();
-                        widgets->spacing(8 ds);
-
-                        TextDisabled("Feature Filter");
-                        Text("%d active", active_filter_count);
-                        widgets->spacing(6 ds);
-
-                        if (widgets->selectable("ESP", config_ui.filter_esp, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_EYE__COG })) {
-                            config_ui.filter_esp = !config_ui.filter_esp;
-                        }
-                        widgets->spacing(4 ds);
-                        if (widgets->selectable("SilentAim", config_ui.filter_silentaim, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_SWORD })) {
-                            config_ui.filter_silentaim = !config_ui.filter_silentaim;
-                        }
-                        widgets->spacing(4 ds);
-                        if (widgets->selectable("Aimbot", config_ui.filter_aimbot, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_TARGET })) {
-                            config_ui.filter_aimbot = !config_ui.filter_aimbot;
-                        }
-                        widgets->spacing(4 ds);
-                        if (widgets->selectable("Trigger", config_ui.filter_triggerbot, { panel_width, 28 ds }, { .rounding = 7, .checkmark = false, .icon = I_DOTS })) {
-                            config_ui.filter_triggerbot = !config_ui.filter_triggerbot;
-                        }
-
-                        if (active_filter_count > 0) {
-                            widgets->spacing(8 ds);
-                            PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
-                            PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
-                            PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
-                            PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.30f).vec4());
-                            if (widgets->button("Clear filters", { panel_width, 30 ds })) {
-                                config_ui.filter_esp = false;
-                                config_ui.filter_silentaim = false;
-                                config_ui.filter_aimbot = false;
-                                config_ui.filter_triggerbot = false;
-                            }
-                            PopStyleColor(3);
-                            PopStyleVar();
-                        }
-                    }
-                    EndChild();
-                    PopStyleVar();
-                }
-                widgets->window.end();
-            }
         }
 }
 

@@ -201,11 +201,17 @@ void Core::Features::cAimbot::SetViewAngles(CPed* Ped, D3DXVECTOR3 BonePos)
     s_lastAimTick = nowAimTick;
     AimDeltaSeconds = std::clamp(AimDeltaSeconds, 0.0005f, 0.05f);
 
+    // Aimbot Speed is presented as a lock strength: 0 = softest/slowest,
+    // 100 = hardest/instant. Internally the base factor is still a divisor,
+    // so invert the slider before converting it to a convergence rate.
+    const float AimSpeedSlider = std::clamp((float)g_Config.Aimbot->AimbotSpeed, 0.0f, 100.0f);
+    const float AimSpeedInverted = 100.0f - AimSpeedSlider;
+
     float BaseFactor;
     if (g_Config.Aimbot->LegitMode)
-        BaseFactor = 1.0f / std::max(1.0f, (float)g_Config.Aimbot->AimbotSpeed * 2.0f);
+        BaseFactor = 1.0f / std::max(1.0f, AimSpeedInverted * 2.0f);
     else
-        BaseFactor = 1.0f / std::max(1.0f, (float)g_Config.Aimbot->AimbotSpeed);
+        BaseFactor = 1.0f / std::max(1.0f, AimSpeedInverted);
 
     const float SmoothFactor = std::clamp(BaseFactor * SmoothStep((float)g_Config.Aimbot->SmoothHorizontal, AimDeltaSeconds), 0.0001f, 1.0f);
 

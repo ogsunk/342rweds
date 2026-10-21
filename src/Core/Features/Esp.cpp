@@ -1476,9 +1476,8 @@ void Core::Features::cEsp::DrawVehicle()
 		if (Distance > Cfg.MaxDistance)
 			continue;
 
-		D3DXVECTOR2 VehicleLocation = Core::SDK::Game::WorldToScreen(
-			Vehicle->GetPos()
-		);
+		const D3DXVECTOR3 VehiclePos = Vehicle->GetPos();
+		D3DXVECTOR2 VehicleLocation = Core::SDK::Game::WorldToScreen(VehiclePos);
 
 		if (!VehicleLocation)
 			continue;
@@ -1490,6 +1489,37 @@ void Core::Features::cEsp::DrawVehicle()
 		{
 			DrawList->AddLine(ImVec2(g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y), ImVec2(VehicleLocation.x, VehicleLocation.y + 30), Cfg.SnapLinesShadowCol, 2.5);
 			DrawList->AddLine(ImVec2(g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y), ImVec2(VehicleLocation.x, VehicleLocation.y + 30), Cfg.SnapLinesCol, 1.5);
+		}
+
+		if (Cfg.Box)
+		{
+			const D3DXVECTOR2 VehicleTop = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, 1.6f));
+			const D3DXVECTOR2 VehicleBottom = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, -0.2f));
+
+			float BoxHeight = 0.0f;
+			float BoxTopY = 0.0f;
+			float BoxBottomY = 0.0f;
+			if (VehicleTop != D3DXVECTOR2(0.0f, 0.0f) && VehicleBottom != D3DXVECTOR2(0.0f, 0.0f))
+			{
+				BoxHeight = std::abs(VehicleBottom.y - VehicleTop.y);
+				BoxTopY = ImMin(VehicleTop.y, VehicleBottom.y);
+				BoxBottomY = ImMax(VehicleTop.y, VehicleBottom.y);
+			}
+
+			if (BoxHeight < 8.0f)
+			{
+				// Fallback for vehicles whose roof point projects off-screen.
+				BoxHeight = ImClamp(2200.0f / ImMax(Distance, 1.0f), 10.0f, 240.0f);
+				BoxTopY = VehicleLocation.y - BoxHeight;
+				BoxBottomY = VehicleLocation.y;
+			}
+
+			const float BoxWidth = BoxHeight * 1.85f;
+			const ImVec2 BoxMin(VehicleLocation.x - BoxWidth * 0.5f, BoxTopY);
+			const ImVec2 BoxMax(VehicleLocation.x + BoxWidth * 0.5f, BoxBottomY);
+
+			DrawList->AddRect(BoxMin, BoxMax, ImColor(0, 0, 0, 220), 0.0f, 0, 2.5f);
+			DrawList->AddRect(BoxMin, BoxMax, Cfg.BoxCol, 0.0f, 0, 1.5f);
 		}
 
 		if (Cfg.VehName)
