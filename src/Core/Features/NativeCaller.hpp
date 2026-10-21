@@ -126,8 +126,8 @@ namespace Core::Features::NativeCaller
 		g_rage_base = FindModuleBase("rage-scripting-five.dll");
 		if (!g_rage_base)
 		{
-			g_available.store(false);
-			return false;
+			// Some builds keep the native map in the main module instead.
+			g_rage_base = Mem.ModBase;
 		}
 
 		uintptr_t rage_size = 0;
@@ -135,6 +135,11 @@ namespace Core::Features::NativeCaller
 		if (GetModuleInformation(Mem.ProcHandle, reinterpret_cast<HMODULE>(g_rage_base), &module_info, sizeof(module_info)))
 		{
 			rage_size = module_info.SizeOfImage;
+		}
+
+		if (!rage_size && g_rage_base == Mem.ModBase)
+		{
+			rage_size = Mem.ModBaseSize;
 		}
 
 		if (!rage_size)
@@ -170,6 +175,11 @@ namespace Core::Features::NativeCaller
 		for (const char* pattern : pointer_patterns)
 		{
 			g_pointer_to_handle = Mem.FindSignatureStr(pattern, Mem.ModBase, Mem.ModBaseSize);
+			if (!g_pointer_to_handle && g_rage_base != Mem.ModBase)
+			{
+				g_pointer_to_handle = Mem.FindSignatureStr(pattern, g_rage_base, rage_size);
+			}
+
 			if (g_pointer_to_handle)
 			{
 				g_pointer_pattern_found = true;
