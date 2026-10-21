@@ -101,7 +101,7 @@ namespace Core
                             }
                         }
 
-                        // Regenerate Armor
+                        // Infinite Armor
                         if (g_Config.Player->RegenerateArmor)
                         {
                             float armor = local_player->GetArmor();
@@ -110,7 +110,7 @@ namespace Core
                             }
                         }
                     }
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             }
         };

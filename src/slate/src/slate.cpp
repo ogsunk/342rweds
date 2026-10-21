@@ -325,7 +325,24 @@ namespace {
     }
 
     const seasonal_menu_palette_t& get_active_menu_palette() {
-        return get_menu_palette(get_active_menu_season());
+        // The menu uses a fixed SunketsWare palette: crimson, white and
+        // neutral dark greys. Seasonal palettes (autumn orange, etc.) are no
+        // longer applied to the live UI.
+        static const seasonal_menu_palette_t sunkets{
+            "SunketsWare",
+            pcolor{ 220, 20, 60, 1.0f },
+            pcolor{ 245, 245, 245, 1.0f },
+            pcolor{ 255, 255, 255, 1.0f },
+            pcolor{ 235, 235, 235, 1.0f },
+            pcolor{ 154, 154, 154, 1.0f },
+            pcolor{ 154, 154, 154, 0.60f },
+            pcolor{ 255, 255, 255, 0.06f },
+            pcolor{ 255, 255, 255, 0.05f },
+            pcolor{ 220, 20, 60, 0.10f },
+            pcolor{ 220, 20, 60, 1.0f },
+            pcolor{ 255, 255, 255, 1.0f }
+        };
+        return sunkets;
     }
 
     enum class menu_theme_mode_t {
@@ -2104,6 +2121,36 @@ namespace {
         teleport_vehicle_entity(vehicle.Pointer, target_position, true);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle voided", 220.0f);
+    }
+
+    void flip_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
+        if (!vehicle.Pointer || !request_vehicle_control(vehicle.Pointer)) {
+            NotifyManager::Send("Vehicle unavailable", 220.0f);
+            return;
+        }
+
+        const uintptr_t vehicle_address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+        D3DXMATRIX matrix = Mem.Read<D3DXMATRIX>(vehicle_address + 0x60);
+
+        // 180-degree roll around the vehicle's forward axis.
+        matrix._11 = -matrix._11;
+        matrix._12 = -matrix._12;
+        matrix._13 = -matrix._13;
+        matrix._31 = -matrix._31;
+        matrix._32 = -matrix._32;
+        matrix._33 = -matrix._33;
+
+        // Lift it a few feet so it has room to come down upside down.
+        D3DXVECTOR3 target_position = vehicle.Pointer->GetPos();
+        target_position.z += 3.0f;
+        matrix._41 = target_position.x;
+        matrix._42 = target_position.y;
+        matrix._43 = target_position.z;
+        matrix._44 = 1.0f;
+
+        Mem.Write<D3DXMATRIX>(vehicle_address + 0x60, matrix);
+        set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+        NotifyManager::Send("Vehicle flipped", 220.0f);
     }
 
     void fling_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
@@ -5149,7 +5196,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##vehicle_directory_entries", { 0, 260 ds }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##vehicle_directory_entries", { 0, 320 ds }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& vehicle : filtered_vehicles) {
                         const bool is_selected = has_selected_vehicle && selected_vehicle.Pointer == vehicle.Pointer;
                         const bool locked = is_vehicle_locked(vehicle);
@@ -5272,7 +5319,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, 200 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -5292,6 +5339,16 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         widgets->spacing(4 ds);
                         if (widgets->button("Repair Vehicle", { button_width, 32 ds })) {
                             repair_vehicle(selected_vehicle);
+                        }
+
+                        widgets->spacing(4 ds);
+                        if (widgets->button("Flip Vehicle", { button_width, 32 ds })) {
+                            flip_vehicle(selected_vehicle);
+                        }
+
+                        widgets->spacing(4 ds);
+                        if (widgets->button("Void Vehicle", { button_width, 32 ds })) {
+                            void_vehicle(selected_vehicle);
                         }
                         PopStyleColor(3);
                         PopStyleVar();
@@ -5405,7 +5462,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->binder(I_COMMAND, "Fast Run Key", &g_Config.Player->FastRunKey);
 
                     widgets->checkbox(I_SPARKLES, "Infinite Stamina", &g_Config.Player->InfiniteStamina);
-                    widgets->checkbox(I_HEART, "Regenerate Armor", &g_Config.Player->RegenerateArmor);
+                    widgets->checkbox(I_SHIELD, "Infinite Armor", &g_Config.Player->RegenerateArmor);
                     widgets->checkbox(I_SHIELD, "No Fall Damage", &g_Config.Player->NoFallDamage);
                     widgets->checkbox(I_CAR, "No Collision", &g_Config.Player->NoCollision);
 
@@ -5446,33 +5503,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         ::RestoreFakeLagPatch();
                     }
                     widgets->sliderfloat(I_CLOCK__HOUR__3, "FakeLag Delay", &g_Config.Player->FakeLagDelay, 40.0f, 2000.0f, "%.0f ms");
-
-                    if (widgets->checkbox(I_DOTS, "Freeze Ammo", &g_Config.Player->InfiniteAmmoEnabled)) {
-                        set_freeze_ammo(g_Config.Player->InfiniteAmmoEnabled);
-                    }
-                    widgets->checkbox(I_COMMAND, "Rapid Fire", &g_Config.Player->RapidFire);
-                    static bool RapidByl = false;
-                    if (g_Config.Player->RapidFire)
-                    {
-                        widgets->sliderfloat(
-                            I_SWORD,
-                            "Rapid Fire Value",
-                            &g_Config.Player->RapidFireSpeed,
-                            1.0f,
-                            15.0f,
-                            "%.0fx"
-                        );
-                        Mem.RapidFireUpdate();
-                        RapidByl = true;
-                    }
-                    else
-                    {
-                        if (RapidByl)
-                        {
-                            Mem.RapidFireUpdate();
-                            RapidByl = false;
-                        }
-                    }
 
                     if (auto* weapon_manager = local_player->GetWeaponManager()) {
                         if (auto* weapon_info = weapon_manager->GetWeaponInfo()) {
@@ -5603,22 +5633,13 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     }
 
                     widgets->spacing(4 ds);
-                    if (widgets->button("Void Current Vehicle", { button_width, 34 ds })) {
-                        D3DXVECTOR3 target_position = current_vehicle->GetPos();
-                        target_position.z = -10.0f;
-                        teleport_vehicle_entity(current_vehicle, target_position, true);
-                        NotifyManager::Send("Current vehicle voided", 220.0f);
+                    if (widgets->button("Flip Vehicle", { button_width, 34 ds })) {
+                        flip_vehicle({ current_vehicle, current_vehicle->GetDriver(), "", 0.f, current_vehicle->IsLocked(), current_vehicle->GetPos() });
                     }
 
                     widgets->spacing(4 ds);
-                    if (widgets->button("Flip Vehicle", { button_width, 34 ds })) {
-                        request_vehicle_control(current_vehicle);
-                        D3DXVECTOR3 target_position = local_player->GetPos();
-                        target_position.y += 2.5f;
-                        target_position.z += 0.35f;
-                        teleport_vehicle_entity(current_vehicle, target_position, true);
-                        set_vehicle_velocity(current_vehicle, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
-                        NotifyManager::Send("Current vehicle Flipped", 220.0f);
+                    if (widgets->button("Void Current Vehicle", { button_width, 34 ds })) {
+                        void_vehicle({ current_vehicle, current_vehicle->GetDriver(), "", 0.f, current_vehicle->IsLocked(), current_vehicle->GetPos() });
                     }
 
                     widgets->spacing(8 ds);
@@ -5635,14 +5656,30 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         g_Config.Player->VehicleColorG = ImClamp(vehicle_col[1], 0.0f, 1.0f);
                         g_Config.Player->VehicleColorB = ImClamp(vehicle_col[2], 0.0f, 1.0f);
                         if (current_vehicle) {
-                            uintptr_t vehicle_model_info = Mem.Read<uintptr_t>((uintptr_t)current_vehicle + 0x20);
-                            if (vehicle_model_info > 0x1000) {
-                                uint8_t r = (uint8_t)(g_Config.Player->VehicleColorR * 255);
-                                uint8_t g = (uint8_t)(g_Config.Player->VehicleColorG * 255);
-                                uint8_t b = (uint8_t)(g_Config.Player->VehicleColorB * 255);
-                                Mem.Write<uint8_t>(vehicle_model_info + 0x30, r);
-                                Mem.Write<uint8_t>(vehicle_model_info + 0x31, g);
-                                Mem.Write<uint8_t>(vehicle_model_info + 0x32, b);
+                            const uintptr_t color_options = Mem.Read<uintptr_t>(reinterpret_cast<uintptr_t>(current_vehicle) + 0x48);
+                            if (color_options > 0x1000) {
+                                const uintptr_t color_data = Mem.Read<uintptr_t>(color_options + 0x20);
+                                if (color_data > 0x1000) {
+                                    const uint8_t r = static_cast<uint8_t>(g_Config.Player->VehicleColorR * 255.0f);
+                                    const uint8_t g = static_cast<uint8_t>(g_Config.Player->VehicleColorG * 255.0f);
+                                    const uint8_t b = static_cast<uint8_t>(g_Config.Player->VehicleColorB * 255.0f);
+
+                                    // Primary custom RGB (stored B, G, R, A).
+                                    Mem.Write<uint8_t>(color_data + 0xA4, b);
+                                    Mem.Write<uint8_t>(color_data + 0xA5, g);
+                                    Mem.Write<uint8_t>(color_data + 0xA6, r);
+                                    Mem.Write<uint8_t>(color_data + 0xA7, 255);
+
+                                    // Match the secondary paint to the selected color.
+                                    Mem.Write<uint8_t>(color_data + 0xA8, b);
+                                    Mem.Write<uint8_t>(color_data + 0xA9, g);
+                                    Mem.Write<uint8_t>(color_data + 0xAA, r);
+                                    Mem.Write<uint8_t>(color_data + 0xAB, 255);
+
+                                    // Mark both slots as custom paint.
+                                    Mem.Write<uint8_t>(color_data + 0xCC, 1);
+                                    Mem.Write<uint8_t>(color_data + 0xCD, 1);
+                                }
                             }
                         }
                     }
@@ -5724,8 +5761,39 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     }
 
                     widgets->checkbox(I_DOTS, "Double Shot", &g_Config.Player->DoubleShot);
-                    widgets->checkbox(I_HEART, "Regenerate Armor", &g_Config.Player->RegenerateArmor);
                     TextDisabled("Double Shot has no recovered runtime implementation.");
+
+                    widgets->spacing(8 ds);
+                    widgets->separator();
+                    widgets->spacing(8 ds);
+
+                    if (widgets->checkbox(I_DOTS, "Freeze Ammo", &g_Config.Player->InfiniteAmmoEnabled)) {
+                        set_freeze_ammo(g_Config.Player->InfiniteAmmoEnabled);
+                    }
+
+                    widgets->checkbox(I_COMMAND, "Rapid Fire", &g_Config.Player->RapidFire);
+                    static bool RapidByl = false;
+                    if (g_Config.Player->RapidFire)
+                    {
+                        widgets->sliderfloat(
+                            I_SWORD,
+                            "Rapid Fire Value",
+                            &g_Config.Player->RapidFireSpeed,
+                            1.0f,
+                            15.0f,
+                            "%.0fx"
+                        );
+                        Mem.RapidFireUpdate();
+                        RapidByl = true;
+                    }
+                    else
+                    {
+                        if (RapidByl)
+                        {
+                            Mem.RapidFireUpdate();
+                            RapidByl = false;
+                        }
+                    }
                 }
             }
             widgets->child.end();
