@@ -4591,7 +4591,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             {
                 widgets->sliderint(I_GRADIENTER, "FOV X", &g_Config.Aimbot->FOVX, 0, 1000, "%d");
                 widgets->sliderint(I_GRADIENTER, "FOV Y", &g_Config.Aimbot->FOVY, 0, 1000, "%d");
-                widgets->sliderint(I_CUBE__3D__SPHERE, "Smooth", &g_Config.Aimbot->AimbotSpeed, 0, 100, "%d%%");
+                widgets->sliderint(I_GAUGE, "Aimbot Speed", &g_Config.Aimbot->AimbotSpeed, 0, 100, "%d");
+                widgets->sliderint(I_CUBE__3D__SPHERE, "Smooth", &g_Config.Aimbot->SmoothHorizontal, 0, 100, "%d%%");
                 //widgets->sliderint(I_VECTOR__SPLINE, "Max Distance", &g_Config.Aimbot->MaxDistance, 0, 1000, "%dm");
                 widgets->sliderfloat(I_RULER__MEASURE, "Fov Thickness", &g_Config.Aimbot->FovThickness, 0.5f, 8.0f, "%.1fpx");
                 widgets->checkbox(I_VECTOR__SPLINE, "Respect Max Range", &g_Config.Aimbot->RespectMaxRange);
