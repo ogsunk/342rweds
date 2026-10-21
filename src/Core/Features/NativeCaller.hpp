@@ -203,7 +203,9 @@ namespace Core::Features::NativeCaller
 		Initialize();
 		return std::string("rage=") + (g_rage_base ? "yes" : "no") +
 			" map=" + (g_map_pattern_found ? "yes" : "no") +
-			" p2h=" + (g_pointer_pattern_found ? "yes" : "no");
+			" p2h=" + (g_pointer_pattern_found ? "yes" : "no") +
+			" modbase=" + (Mem.ModBase ? "yes" : "no") +
+			" proc=" + (Mem.ProcHandle ? "yes" : "no");
 	}
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
