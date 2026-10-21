@@ -459,15 +459,29 @@ namespace {
 
         if (get_menu_theme_mode() == menu_theme_mode_t::Dynamic) {
             apply_seasonal_menu_theme();
-            return;
+        }
+        else {
+            sync_imgui_theme_colors();
         }
 
+        // SunketsWare branding uses a stable crimson accent instead of the
+        // seasonal accent so navigation and status colors remain consistent.
+        const pcolor crimson{ 220, 20, 60, 1.0f };
+        g_style->colors[pcol_scheme] = crimson;
+        g_style->colors[pcol_bg5] = blend_color(g_style->colors[pcol_bg5], crimson, 0.18f);
+        g_style->colors[pcol_separator] = with_alpha(crimson, 0.12f);
+        g_style->colors[pcol_backdrop] = with_alpha(crimson, 0.08f);
         sync_imgui_theme_colors();
     }
 
     void draw_seasonal_logo(ImDrawList* draw, const ImVec2& min, const ImVec2& max, const pcolor& tint) {
-        Core::Features::SunketsWareVisuals::SetLogoTexture(reinterpret_cast<void*>(static_cast<ImTextureID>(get_active_menu_logo_texture())));
-        draw->AddImage((ImTextureID)get_active_menu_logo_texture(), min, max, { 0, 0 }, { 1, 1 }, tint);
+        const ImTextureID texture = static_cast<ImTextureID>(get_active_menu_logo_texture());
+        Core::Features::SunketsWareVisuals::SetLogoTexture(reinterpret_cast<void*>(texture));
+        if (!texture) {
+            return;
+        }
+
+        draw->AddImage(texture, min, max, { 0, 0 }, { 1, 1 }, tint);
     }
 
     void draw_seasonal_logo(ImDrawList* draw, const ImVec2& min, const ImVec2& max) {
@@ -1015,6 +1029,11 @@ namespace {
             if (ok && !fetched_profile.discord_id.empty()) {
                 std::string discord_raw;
                 auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
+
+                auth::discord_ipc_identity discord_identity{};
+                if (auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw)) {
+                    fetched_profile.discord_username = discord_identity.username;
+                }
             }
 
             {
@@ -1132,7 +1151,13 @@ namespace {
 
         const std::string preferred_name = !profile.discord_display_name.empty() ? profile.discord_display_name : profile.user_name;
         const std::string validated_name = has_profile ? Utils::ValidateTextForRendering(preferred_name) : std::string{};
-        const std::string account_name = make_safe_ui_label(validated_name.empty() ? "SunketsWare" : validated_name, "SunketsWare");
+        const std::string display_name = make_safe_ui_label(validated_name.empty() ? "Discord" : validated_name, "Discord");
+        const std::string username = make_safe_ui_label(
+            Utils::ValidateTextForRendering(profile.discord_username).empty()
+                ? profile.user_name
+                : profile.discord_username,
+            "unknown"
+        );
         const std::string until_text = format_account_until_text(profile);
 
         const ImVec2 card_pos = GetWindowPos() + ImVec2{ 14 ds, GetWindowHeight() - 58 ds };
@@ -1148,7 +1173,7 @@ namespace {
         draw->AddRectFilled(card_pos, card_pos + card_size, g_style->col(pcol_bg3), 10 ds);
         draw->AddRect(card_pos, card_pos + card_size, g_style->col(pcol_border), 10 ds);
 
-        if (!loaded_avatar_url.empty()) {
+        if (!loaded_avatar_url.empty() && static_cast<bool>(static_cast<ImTextureID>(instance->avatar))) {
             draw->AddImageRounded((ImTextureID)instance->avatar, avatar_min, avatar_max, { 0, 0 }, { 1, 1 }, IM_COL32_WHITE, 12 ds);
         }
         else {
@@ -1165,9 +1190,11 @@ namespace {
             meta_font = GetFont();
         }
 
-        const std::string clipped_name = account_name.substr(0, 48);
-        draw->AddText(name_font, 14 ds, { text_x, card_pos.y + 7 ds }, g_style->col(pcol_text), clipped_name.c_str(), nullptr, text_width);
-        draw->AddText(meta_font, 12 ds, { text_x, card_pos.y + 23 ds }, g_style->col(pcol_text2), until_text.c_str(), nullptr, text_width);
+        const std::string clipped_name = display_name.substr(0, 48);
+        const std::string clipped_username = username.substr(0, 48);
+        draw->AddText(name_font, 14 ds, { text_x, card_pos.y + 5 ds }, g_style->col(pcol_text), clipped_name.c_str(), nullptr, text_width);
+        draw->AddText(meta_font, 12 ds, { text_x, card_pos.y + 20 ds }, g_style->col(pcol_text2), ("@" + clipped_username).c_str(), nullptr, text_width);
+        draw->AddText(meta_font, 11 ds, { text_x, card_pos.y + 32 ds }, g_style->col(pcol_text3), until_text.c_str(), nullptr, text_width);
     }
 
     bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
@@ -4169,6 +4196,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
     g_lang->initialize();
 
     initialize_fonts();
+    load_menu_logo_texture(device, get_active_menu_season());
 
     // load_menu_logo_texture(device, menu_season_t::Spring);
     // load_menu_logo_texture(device, menu_season_t::Summer);
@@ -5754,7 +5782,9 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                         draw_seasonal_logo_widget(vec2{ 34.f, 34.f });
                         SameLine(0, 4.f ds);
                         SetCursorPosY(GetCursorPosY() + 9.f ds);
-                        TextColored(g_style->col(pcol_scheme), "SunketsWare");
+                        TextColored(g_style->col(pcol_text), "Sunkets");
+                        SameLine(0, 0);
+                        TextColored(g_style->col(pcol_scheme), "Ware");
                     }
                     EndGroup();
                     widgets->spacing(14.f ds);

@@ -38,6 +38,7 @@ namespace auth {
 		std::string expires_at;
 		std::string discord_id;
 		std::string discord_display_name;
+		std::string discord_username;
 		std::string discord_avatar_url;
 		bool admin = false;
 		bool staff = false;
