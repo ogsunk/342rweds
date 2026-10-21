@@ -275,6 +275,13 @@ void Gui::Rendering()
 				continue;
 			}
 
+			MEMORY_BASIC_INFORMATION mbi{};
+			if (!VirtualQueryEx(Mem.AttachedProcessHandle, reinterpret_cast<LPCVOID>(it->ped + 0x320), &mbi, sizeof(mbi)) ||
+				mbi.State != MEM_COMMIT) {
+				it = impulses.erase(it);
+				continue;
+			}
+
 			Mem.Write<D3DXVECTOR3>(it->ped + 0x320, it->velocity);
 			++it;
 		}
