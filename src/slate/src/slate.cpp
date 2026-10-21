@@ -1027,39 +1027,42 @@ namespace {
             auth::AccountProfile fetched_profile{};
             std::string raw;
             const bool ok = auth::LoadCurrentAccountProfile(fetched_profile, &raw);
-            if (ok) {
-                std::string discord_raw;
-                auth::discord_ipc_identity discord_identity{};
-                const bool local_discord_ok = auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw);
+            std::string discord_raw;
+            auth::discord_ipc_identity discord_identity{};
+            const bool local_discord_ok = auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw);
 
-                if (local_discord_ok) {
-                    if (fetched_profile.discord_id.empty()) {
-                        fetched_profile.discord_id = discord_identity.id;
-                    }
-                    fetched_profile.discord_username = discord_identity.username;
-                    fetched_profile.discord_avatar_hash = discord_identity.avatar_hash;
-                    if (fetched_profile.discord_display_name.empty()) {
-                        fetched_profile.discord_display_name = discord_identity.username;
-                    }
+            // IPC must remain independent from the account request. A
+            // transient account/API failure must not erase Discord identity.
+            if (local_discord_ok) {
+                if (fetched_profile.discord_id.empty()) {
+                    fetched_profile.discord_id = discord_identity.id;
                 }
+                fetched_profile.discord_username = discord_identity.username;
+                fetched_profile.discord_avatar_hash = discord_identity.avatar_hash;
+                if (fetched_profile.discord_display_name.empty()) {
+                    fetched_profile.discord_display_name = discord_identity.username;
+                }
+                if (fetched_profile.user_name.empty()) {
+                    fetched_profile.user_name = discord_identity.username;
+                }
+            }
 
-                // Resolve the avatar/display profile over HTTP using the Discord ID.
-                if (!fetched_profile.discord_id.empty()) {
-                    auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
-                }
+            // Resolve the avatar/display profile over HTTP whenever an ID is available.
+            if (!fetched_profile.discord_id.empty()) {
+                auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
+            }
 
-                if (fetched_profile.discord_avatar_url.empty() &&
-                    !fetched_profile.discord_id.empty() &&
-                    !fetched_profile.discord_avatar_hash.empty()) {
-                    fetched_profile.discord_avatar_url =
-                        "https://cdn.discordapp.com/avatars/" + fetched_profile.discord_id + "/" +
-                        fetched_profile.discord_avatar_hash + ".png?size=128";
-                }
+            if (fetched_profile.discord_avatar_url.empty() &&
+                !fetched_profile.discord_id.empty() &&
+                !fetched_profile.discord_avatar_hash.empty()) {
+                fetched_profile.discord_avatar_url =
+                    "https://cdn.discordapp.com/avatars/" + fetched_profile.discord_id + "/" +
+                    fetched_profile.discord_avatar_hash + ".png?size=128";
             }
 
             {
                 std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
-                if (ok) {
+                if (ok || local_discord_ok) {
                     account_sidebar_state.profile = std::move(fetched_profile);
                     account_sidebar_state.has_profile = true;
                     const std::string avatar_url = trim_copy(account_sidebar_state.profile.discord_avatar_url);

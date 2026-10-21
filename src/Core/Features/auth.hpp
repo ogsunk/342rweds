@@ -806,6 +806,7 @@ namespace auth {
 		json_get_string(userObject, xorstr("expiredate"), &profile.expiredate);
 		json_get_string(userObject, xorstr("expires_at"), &profile.expires_at);
 		json_get_string(userObject, xorstr("discordid"), &profile.discord_id);
+		json_get_string(userObject, xorstr("discord_username"), &profile.discord_username);
 		int admin = 0;
 		int staff = 0;
 		json_get_int(userObject, xorstr("admin"), &admin);
@@ -816,6 +817,9 @@ namespace auth {
 		std::string discordProfileObject;
 		if (json_get_object(userObject, xorstr("discord_profile"), &discordProfileObject)) {
 			json_get_string(discordProfileObject, xorstr("display_name"), &profile.discord_display_name);
+			if (profile.discord_username.empty()) {
+				json_get_string(discordProfileObject, xorstr("username"), &profile.discord_username);
+			}
 			json_get_string(discordProfileObject, xorstr("avatar_url"), &profile.discord_avatar_url);
 		}
 
@@ -877,6 +881,9 @@ namespace auth {
 		}
 
 		json_get_string(profileObject, xorstr("display_name"), &profile.discord_display_name);
+		if (profile.discord_username.empty()) {
+			json_get_string(profileObject, xorstr("username"), &profile.discord_username);
+		}
 		json_get_string(profileObject, xorstr("avatar_url"), &profile.discord_avatar_url);
 		if (raw) *raw = body;
 		return !profile.discord_display_name.empty() || !profile.discord_avatar_url.empty();
