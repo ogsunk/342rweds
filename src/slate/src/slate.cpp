@@ -1715,7 +1715,11 @@ namespace {
 
         const float directory_gap = 8.f ds;
         const float directory_column_width = (GetContentRegionAvail().x - directory_gap) * 0.5f;
+        const float directory_row_y = GetCursorPosY();
 
+        // Draw the player list on the right, then the selected panel on the
+        // left, matching the Misc tab's centered two-column layout.
+        SetCursorPosX(directory_column_width + directory_gap);
         BeginGroup();
         {
             widgets->child.begin(I_USER__COG, list_title, 1, { directory_column_width, 312 ds });
@@ -1777,7 +1781,7 @@ namespace {
         }
         EndGroup();
 
-        SameLine(0, directory_gap);
+        SetCursorPos({ 0, directory_row_y });
 
         BeginGroup();
         {
@@ -5101,6 +5105,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         const float vehicle_directory_gap = 8.f ds;
         const float vehicle_directory_column_width = (GetContentRegionAvail().x - vehicle_directory_gap) * 0.5f;
+        const float vehicle_directory_row_y = GetCursorPosY();
 
         const auto all_vehicles = collect_vehicle_directory_entries();
         auto filtered_vehicles = all_vehicles;
@@ -5117,6 +5122,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             selected_vehicle_ptr = 0;
         }
 
+        // Vehicle list on the right, selected vehicle on the left.
+        SetCursorPosX(vehicle_directory_column_width + vehicle_directory_gap);
         BeginGroup();
         {
             widgets->child.begin(I_CAR, "Vehicles", 1, { vehicle_directory_column_width, 312 ds });
@@ -5171,7 +5178,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         }
         EndGroup();
 
-        SameLine(0, vehicle_directory_gap);
+        SetCursorPos({ 0, vehicle_directory_row_y });
 
         BeginGroup();
         {
