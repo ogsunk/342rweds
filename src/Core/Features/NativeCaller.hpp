@@ -6,6 +6,7 @@
 namespace Core::Features::NativeCaller
 {
 	inline uintptr_t g_pointer_to_handle = 0;
+	inline uintptr_t g_get_native_handler = 0;
 	inline uintptr_t g_fast_path_map = 0;
 	inline uintptr_t g_rage_base = 0;
 	inline bool g_map_pattern_found = false;
@@ -129,6 +130,61 @@ namespace Core::Features::NativeCaller
 		return result;
 	}
 
+	inline uintptr_t ResolveExport(uintptr_t module_base, const char* name_part)
+	{
+		if (!module_base || !name_part)
+			return 0;
+
+		const uint32_t e_lfanew = Mem.Read<uint32_t>(module_base + 0x3C);
+		if (!e_lfanew)
+			return 0;
+
+		const uintptr_t nt = module_base + e_lfanew;
+		if (Mem.Read<uint32_t>(nt) != 0x00004550) // 'PE\0\0'
+			return 0;
+
+		const uintptr_t optional = nt + 0x18;
+		const uint16_t magic = Mem.Read<uint16_t>(optional);
+		const uintptr_t data_dir = optional + (magic == 0x20B ? 0x70 : 0x60);
+
+		const uint32_t export_rva = Mem.Read<uint32_t>(data_dir + 0x00);
+		if (!export_rva)
+			return 0;
+
+		const uintptr_t export_dir = module_base + export_rva;
+		const uint32_t num_funcs = Mem.Read<uint32_t>(export_dir + 0x14);
+		const uint32_t num_names = Mem.Read<uint32_t>(export_dir + 0x18);
+		const uint32_t funcs_rva = Mem.Read<uint32_t>(export_dir + 0x1C);
+		const uint32_t names_rva = Mem.Read<uint32_t>(export_dir + 0x20);
+		const uint32_t ords_rva = Mem.Read<uint32_t>(export_dir + 0x24);
+
+		if (!num_funcs || !num_names || !funcs_rva || !names_rva || !ords_rva)
+			return 0;
+
+		for (uint32_t i = 0; i < num_names; ++i)
+		{
+			const uint32_t name_offset = Mem.Read<uint32_t>(module_base + names_rva + i * 4);
+			if (!name_offset)
+				continue;
+
+			const std::string export_name = Mem.ReadString(module_base + name_offset);
+			if (export_name.find(name_part) == std::string::npos)
+				continue;
+
+			const uint16_t ordinal = Mem.Read<uint16_t>(module_base + ords_rva + i * 2);
+			if (ordinal >= num_funcs)
+				continue;
+
+			const uint32_t func_rva = Mem.Read<uint32_t>(module_base + funcs_rva + ordinal * 4);
+			if (!func_rva)
+				continue;
+
+			return module_base + func_rva;
+		}
+
+		return 0;
+	}
+
 	inline bool Initialize()
 	{
 		std::lock_guard<std::mutex> lock(g_init_mutex);
@@ -161,46 +217,55 @@ namespace Core::Features::NativeCaller
 			return false;
 		}
 
-		const char* map_patterns[] = {
-			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ? 4C 8B 4C 24",
-			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ?",
-			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08"
-		};
+		// FiveM exports scrEngine::GetNativeHandler from rage-scripting-five.dll.
+		// Resolving the export is far more reliable than pattern-scanning the map.
+		g_get_native_handler = ResolveExport(g_rage_base, "GetNativeHandler");
+		g_map_pattern_found = g_get_native_handler != 0;
 
-		for (const char* pattern : map_patterns)
+		// pointer_to_handle is a game function in the main module. Prefer the
+		// known per-build RVA, then fall back to patterns.
+		switch (g_Offsets.CurrentBuild)
 		{
-			const uintptr_t map_lea = Mem.FindSignatureStr(pattern, g_rage_base, rage_size);
-			if (!map_lea)
-				continue;
-
-			const int32_t displacement = Mem.Read<int32_t>(map_lea + 3);
-			g_fast_path_map = map_lea + 7 + displacement;
-			g_map_pattern_found = g_fast_path_map != 0;
-			break;
+		case 3095: g_pointer_to_handle = Mem.ModBase + 0x1624F80; break;
+		case 2944: g_pointer_to_handle = Mem.ModBase + 0x160FF90; break;
+		case 2802: g_pointer_to_handle = Mem.ModBase + 0x15EA290; break;
+		case 2699: g_pointer_to_handle = Mem.ModBase + 0x15D6CEC; break;
+		case 2612: g_pointer_to_handle = Mem.ModBase + 0x15DFE20; break;
+		case 2545: g_pointer_to_handle = Mem.ModBase + 0x15DEEB0; break;
+		case 2372: g_pointer_to_handle = Mem.ModBase + 0x15CD2C0; break;
+		case 2189: g_pointer_to_handle = Mem.ModBase + 0x15B1008; break;
+		case 2060: g_pointer_to_handle = Mem.ModBase + 0x159B224; break;
+		default: g_pointer_to_handle = 0; break;
 		}
 
-		const char* pointer_patterns[] = {
-			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
-			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15",
-			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20"
-		};
-
-		for (const char* pattern : pointer_patterns)
+		if (!g_pointer_to_handle)
 		{
-			g_pointer_to_handle = Mem.FindSignatureStr(pattern, Mem.ModBase, Mem.ModBaseSize);
-			if (!g_pointer_to_handle && g_rage_base != Mem.ModBase)
-			{
-				g_pointer_to_handle = Mem.FindSignatureStr(pattern, g_rage_base, rage_size);
-			}
+			const uintptr_t long_pattern = Mem.FindSignatureStr(
+				"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
+				Mem.ModBase,
+				Mem.ModBaseSize);
 
-			if (g_pointer_to_handle)
+			if (long_pattern)
 			{
-				g_pointer_pattern_found = true;
-				break;
+				g_pointer_to_handle = long_pattern;
+			}
+			else
+			{
+				const uintptr_t short_pattern = Mem.FindSignatureStr(
+					"48 8B F9 48 83 C1 10 33 DB",
+					Mem.ModBase,
+					Mem.ModBaseSize);
+
+				if (short_pattern)
+				{
+					g_pointer_to_handle = short_pattern - 0x15;
+				}
 			}
 		}
 
-		const bool available = g_fast_path_map != 0 && g_pointer_to_handle != 0;
+		g_pointer_pattern_found = g_pointer_to_handle != 0;
+
+		const bool available = g_get_native_handler != 0 && g_pointer_to_handle != 0;
 		g_available.store(available);
 		return available;
 	}
@@ -230,27 +295,10 @@ namespace Core::Features::NativeCaller
 
 	inline uintptr_t GetNativeHandler(uint64_t hash)
 	{
-		if (!Initialize() || !g_fast_path_map)
+		if (!Initialize() || !g_get_native_handler)
 			return 0;
 
-		// MSVC std::unordered_map layout: the _List head is at offset 0, and
-		// each node stores _Next/_Prev followed by the pair<NativeHash, handler>.
-		const uintptr_t head = Mem.Read<uintptr_t>(g_fast_path_map);
-		if (!head)
-			return 0;
-
-		uintptr_t node = Mem.Read<uintptr_t>(head);
-		int safety = 0;
-		while (node && node != head && safety++ < 200000)
-		{
-			const uint64_t key = Mem.Read<uint64_t>(node + 0x10);
-			if (key == hash)
-				return Mem.Read<uintptr_t>(node + 0x18);
-
-			node = Mem.Read<uintptr_t>(node);
-		}
-
-		return 0;
+		return static_cast<uintptr_t>(RemoteCall1(g_get_native_handler, hash));
 	}
 
 	inline bool InvokeNative(uint64_t hash, const std::vector<uint64_t>& args, uint64_t* result = nullptr)
