@@ -1818,9 +1818,16 @@ namespace {
 
         request_player_control(entity);
         const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
-        // 0x10A8: ragdoll byte, 0x01 = ragdoll on.
-        Mem.Write<uint8_t>(ped_address + 0x10A8, 0x01);
+
+        // Use the ped's own no-ragdoll helper instead of hard-coded offsets.
+        // 0x10A8 is PlayerInfo on current builds and writing it crashes.
+        entity.Ped->NoRagDoll(false);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromAnyPedImpact, false);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromMelee, false);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromBulletImpact, false);
         Mem.Write<uint8_t>(ped_address + 0x2E, 0);
+
         D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
         velocity.x += 2.0f;
         velocity.y += 2.0f;
@@ -2321,6 +2328,48 @@ namespace {
         Mem.Write<D3DXMATRIX>(vehicle_address + 0x60, matrix);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle flipped", 220.0f);
+    }
+
+    void stop_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
+        if (!vehicle.Pointer || !request_vehicle_control(vehicle.Pointer)) {
+            NotifyManager::Send("Vehicle unavailable", 220.0f);
+            return;
+        }
+
+        set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+        NotifyManager::Send("Vehicle stopped", 220.0f);
+    }
+
+    void toggle_vehicle_godmode(const Core::SDK::Game::VehicleStructure& vehicle) {
+        if (!vehicle.Pointer) {
+            NotifyManager::Send("Vehicle unavailable", 220.0f);
+            return;
+        }
+
+        const bool enabled = !vehicle.Pointer->GetGodMode();
+        vehicle.Pointer->SetGodMode(enabled);
+        NotifyManager::Send(enabled ? "Vehicle godmode on" : "Vehicle godmode off", 220.0f);
+    }
+
+    void explode_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
+        if (!vehicle.Pointer || !request_vehicle_control(vehicle.Pointer)) {
+            NotifyManager::Send("Vehicle unavailable", 220.0f);
+            return;
+        }
+
+        const uintptr_t vehicle_address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+        if (g_Offsets.m_VehicleBodyHealth) {
+            Mem.Write<float>(vehicle_address + g_Offsets.m_VehicleBodyHealth, 0.0f);
+        }
+        if (g_Offsets.m_VehiclePetrolTankHealth) {
+            Mem.Write<float>(vehicle_address + g_Offsets.m_VehiclePetrolTankHealth, 0.0f);
+        }
+        if (g_Offsets.m_VehicleEngineHealth) {
+            Mem.Write<float>(vehicle_address + g_Offsets.m_VehicleEngineHealth, 0.0f);
+        }
+
+        set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+        NotifyManager::Send("Vehicle destroyed", 220.0f);
     }
 
     void fling_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
@@ -5489,7 +5538,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, 200 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, 180 ds }, true);
                     {
                         Text("Actions");
 
@@ -5497,29 +5546,51 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         widgets->separator();
                         widgets->spacing(6 ds);
 
-                        const float button_width = GetContentRegionAvail().x;
-                        PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
+                        PushStyleVar(ImGuiStyleVar_FrameRounding, 5 ds);
                         PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
                         PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
                         PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.28f).vec4());
-                        if (widgets->button(locked ? "Unlock Vehicle" : "Lock Vehicle", { button_width, 32 ds })) {
-                            toggle_vehicle_lock(selected_vehicle);
-                        }
 
-                        widgets->spacing(4 ds);
-                        if (widgets->button("Repair Vehicle", { button_width, 32 ds })) {
-                            repair_vehicle(selected_vehicle);
-                        }
+                        const float action_gap = 4 ds;
+                        const float action_button_width = (GetContentRegionAvail().x - action_gap * 2.0f) / 3.0f;
+                        int action_column = 0;
+                        auto action_button = [&](const char* label, const char* tooltip, auto&& callback) {
+                            if (widgets->button(label, { action_button_width, 22 ds })) {
+                                callback();
+                            }
 
-                        widgets->spacing(4 ds);
-                        if (widgets->button("Flip Vehicle", { button_width, 32 ds })) {
-                            flip_vehicle(selected_vehicle);
-                        }
+                            if (IsItemHovered()) {
+                                SetTooltip("%s", tooltip);
+                            }
 
-                        widgets->spacing(4 ds);
-                        if (widgets->button("Void Vehicle", { button_width, 32 ds })) {
-                            void_vehicle(selected_vehicle);
-                        }
+                            if (action_column < 2) {
+                                SameLine(0, action_gap);
+                                ++action_column;
+                            }
+                            else {
+                                action_column = 0;
+                            }
+                            };
+
+                        action_button("TP To", "Teleport To Vehicle", [&] { teleport_to_vehicle(selected_vehicle); });
+                        action_button("Pull", "Pull Vehicle To Me", [&] { pull_vehicle_to_local(selected_vehicle); });
+                        action_button("Fling", "Fling Vehicle", [&] { fling_vehicle(selected_vehicle); });
+                        action_button("Stop", "Stop Vehicle", [&] { stop_vehicle(selected_vehicle); });
+                        action_button("Repair", "Repair Vehicle", [&] { repair_vehicle(selected_vehicle); });
+                        action_button("Flip", "Flip Vehicle", [&] { flip_vehicle(selected_vehicle); });
+                        action_button("Void", "Void Vehicle", [&] { void_vehicle(selected_vehicle); });
+                        action_button(locked ? "Unlock" : "Lock", "Lock / Unlock Vehicle", [&] { toggle_vehicle_lock(selected_vehicle); });
+                        action_button("God", "Toggle Vehicle Godmode", [&] { toggle_vehicle_godmode(selected_vehicle); });
+                        action_button("Explode", "Explode Vehicle", [&] { explode_vehicle(selected_vehicle); });
+                        action_button("Name", "Copy Vehicle Name", [&] { copy_player_value_to_clipboard(get_vehicle_display_name(selected_vehicle), "Vehicle name copied", "Vehicle name unavailable"); });
+                        action_button("Driver", "Copy Driver Name", [&] { copy_player_value_to_clipboard(get_vehicle_driver_name(selected_vehicle), "Driver name copied", "Driver name unavailable"); });
+                        action_button("Coords", "Copy Vehicle Coordinates", [&] {
+                            char coordinates[64]{};
+                            const D3DXVECTOR3 position = selected_vehicle.Pointer ? selected_vehicle.Pointer->GetPos() : D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+                            std::snprintf(coordinates, sizeof(coordinates), "%.1f, %.1f, %.1f", position.x, position.y, position.z);
+                            copy_player_value_to_clipboard(coordinates, "Coordinates copied", "Coordinates unavailable");
+                            });
+
                         PopStyleColor(3);
                         PopStyleVar();
                     }
