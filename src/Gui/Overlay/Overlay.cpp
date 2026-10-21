@@ -169,12 +169,24 @@ namespace Gui
 
 				ImGui::GetIO().MouseDrawCursor = false;
 				ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
-				ShowWindow(g_Variables.g_hCheatWindow, SW_HIDE);
+
+				// Keep the layered overlay alive but fully transparent and
+				// click-through instead of toggling SW_HIDE/SW_SHOW, which can
+				// flash over other applications when alt-tabbing.
+				ShowWindow(g_Variables.g_hCheatWindow, SW_SHOWNA);
+				Gui::ApplyStreamProofAffinity(g_Config.General->StreamProof);
+
+				const float ClearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				g_pd3dDeviceContext->OMSetRenderTargets(1U, &g_mainRenderTargetView, NULL);
+				g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, ClearColor);
+				g_pSwapChain->Present(true, 0U);
+
 				std::this_thread::sleep_for(std::chrono::milliseconds(35));
 				continue;
 			}
 
 			ShowWindow(g_Variables.g_hCheatWindow, SW_SHOWNA);
+			Gui::ApplyStreamProofAffinity(g_Config.General->StreamProof);
 
 			if (menuToggleKey > 0 && (GetAsyncKeyState(menuToggleKey) & 1)) {
 

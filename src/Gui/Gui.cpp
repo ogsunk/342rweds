@@ -181,15 +181,13 @@ namespace NvidiaBypass {
 				if (!g_isPatched && NvidiaBypass::IsNvidiaProcessReady()) {
 					ApplyNvidiaPatches();
 				}
-				if (g_Variables.g_hCheatWindow && IsWindow(g_Variables.g_hCheatWindow))
-					SetWindowDisplayAffinity(g_Variables.g_hCheatWindow, WDA_EXCLUDEFROMCAPTURE);
+				Gui::ApplyStreamProofAffinity(true);
 			}
 			else {
 				if (g_isPatched) {
 					RevertNvidiaPatches();  // Gebruik nu de revert functie
 				}
-				if (g_Variables.g_hCheatWindow && IsWindow(g_Variables.g_hCheatWindow))
-					SetWindowDisplayAffinity(g_Variables.g_hCheatWindow, WDA_NONE);
+				Gui::ApplyStreamProofAffinity(false);
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
@@ -223,11 +221,11 @@ namespace overlay {
 					g_NvidiaPatchesApplied = true;
 			}
 
-			SetWindowDisplayAffinity(g_Variables.g_hCheatWindow, WDA_EXCLUDEFROMCAPTURE);
+			Gui::ApplyStreamProofAffinity(true);
 			g_StreamProofEnabled = true;
 		}
 		else if (!enable && g_StreamProofEnabled) {
-			SetWindowDisplayAffinity(g_Variables.g_hCheatWindow, WDA_NONE);
+			Gui::ApplyStreamProofAffinity(false);
 
 			// Revert patches wanneer stream proof wordt uitgeschakeld
 			if (g_NvidiaPatchesApplied) {
@@ -243,6 +241,23 @@ namespace overlay {
 
 #pragma endregion
 
+void Gui::ApplyStreamProofAffinity(bool enable) {
+	HWND hwnd = g_Variables.g_hCheatWindow;
+	if (!hwnd || !IsWindow(hwnd)) {
+		return;
+	}
+
+	if (!enable) {
+		SetWindowDisplayAffinity(hwnd, WDA_NONE);
+		return;
+	}
+
+	// WDA_EXCLUDEFROMCAPTURE is the proper "invisible to capture" mode on
+	// Windows 10 2004+. Older systems fall back to WDA_MONITOR.
+	if (!SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)) {
+		SetWindowDisplayAffinity(hwnd, WDA_MONITOR);
+	}
+}
 
 void Gui::Rendering()
 {
