@@ -1749,6 +1749,8 @@ namespace {
         NotifyManager::Send(message, 220.0f);
     }
 
+    bool native_set_entity_velocity(uintptr_t entity, float x, float y, float z);
+
     void freeze_player(const Core::SDK::Game::EntityStruct& entity, bool freeze) {
         if (!entity.Ped) {
             NotifyManager::Send("Player unavailable", 220.0f);
@@ -1795,6 +1797,7 @@ namespace {
         Mem.Write<uint8_t>(ped_address + 0x2E, 0);
         Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
         queue_player_impulse(entity.Ped, velocity);
+        native_set_entity_velocity(ped_address, velocity.x, velocity.y, velocity.z);
         NotifyManager::Send("Player launched", 220.0f);
     }
 
@@ -1811,6 +1814,7 @@ namespace {
         Mem.Write<uint8_t>(ped_address + 0x2E, 0);
         Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
         queue_player_impulse(entity.Ped, velocity, 500);
+        native_set_entity_velocity(ped_address, velocity.x, velocity.y, velocity.z);
         NotifyManager::Send("Player lifted", 220.0f);
     }
 
@@ -1926,6 +1930,25 @@ namespace {
             0
         };
         return Core::Features::NativeCaller::InvokeNative(0x697157CED63F18D4ull, args);
+    }
+
+    bool native_set_entity_velocity(uintptr_t entity, float x, float y, float z) {
+        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(entity);
+        if (!handle) {
+            return false;
+        }
+
+        const std::vector<uint64_t> args = {
+            handle,
+            Core::Features::NativeCaller::FloatBits(x),
+            Core::Features::NativeCaller::FloatBits(y),
+            Core::Features::NativeCaller::FloatBits(z)
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x1C99BB7B6E96D16Full, args);
     }
 
     void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);
@@ -2396,6 +2419,7 @@ namespace {
         target_position.y += 2.5f;
         target_position.z += 0.35f;
         teleport_vehicle_entity(vehicle.Pointer, target_position, true);
+        native_set_entity_velocity(reinterpret_cast<uintptr_t>(vehicle.Pointer), 0.0f, 0.0f, 0.0f);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle pulled", 220.0f);
     }
@@ -2410,6 +2434,7 @@ namespace {
         target_position.z = -10.0f;
 		vehicle.Pointer->Fix(0);
         teleport_vehicle_entity(vehicle.Pointer, target_position, true);
+        native_set_entity_velocity(reinterpret_cast<uintptr_t>(vehicle.Pointer), 0.0f, 0.0f, 0.0f);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle voided", 220.0f);
     }
@@ -2440,6 +2465,11 @@ namespace {
         matrix._44 = 1.0f;
 
         Mem.Write<D3DXMATRIX>(vehicle_address + 0x60, matrix);
+
+        // Repairing after the flip makes the game drop the vehicle instead of
+        // leaving it frozen in the air.
+        vehicle.Pointer->Fix(1000.0f);
+        native_set_entity_velocity(vehicle_address, 0.0f, 0.0f, 0.0f);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle flipped", 220.0f);
     }
@@ -2450,6 +2480,7 @@ namespace {
             return;
         }
 
+        native_set_entity_velocity(reinterpret_cast<uintptr_t>(vehicle.Pointer), 0.0f, 0.0f, 0.0f);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle stopped", 220.0f);
     }
@@ -2524,15 +2555,13 @@ namespace {
             direction = D3DXVECTOR3{ 0.0f, 1.0f, 0.0f };
         }
 
-        D3DXVECTOR3 position = vehicle.Pointer->GetPos();
-        position.z += 0.35f;
-        vehicle.Pointer->SetPos(position);
+        const float velocity_x = direction.x * 55.0f;
+        const float velocity_y = direction.y * 55.0f;
+        const float velocity_z = 85.0f;
 
-        set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{
-            direction.x * 55.0f,
-            direction.y * 55.0f,
-            85.0f
-            });
+        if (!native_set_entity_velocity(reinterpret_cast<uintptr_t>(vehicle.Pointer), velocity_x, velocity_y, velocity_z)) {
+            set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ velocity_x, velocity_y, velocity_z });
+        }
 
         NotifyManager::Send("Vehicle flung (random direction)", 220.0f);
     }
@@ -6190,6 +6219,18 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
                 widgets->checkbox(I_EYE__OFF, "Stream Proof", &g_Config.General->StreamProof); 
                 widgets->checkbox(I_EYE__BOLT, "Experimental Natives", &g_Config.General->NativeFeatures);
+                if (widgets->button("Test Native Caller", { 180 ds, 26 ds })) {
+                    if (!g_Config.General->NativeFeatures) {
+                        NotifyManager::Send("Enable Experimental Natives first", 260.0f);
+                    }
+                    else if (!Core::Features::NativeCaller::IsAvailable()) {
+                        NotifyManager::Send("Native caller unavailable", 260.0f);
+                    }
+                    else {
+                        const uintptr_t handler = Core::Features::NativeCaller::GetNativeHandler(0xAE99FB955581844Aull);
+                        NotifyManager::Send(handler ? "Native handler OK" : "Native handler not found", 260.0f);
+                    }
+                }
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
                 //    std::thread([&] { NvidiaProofing::Execute(g_Config.General->NVStreamProof);}).detach();
                 //}

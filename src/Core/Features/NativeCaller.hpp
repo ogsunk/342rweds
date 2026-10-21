@@ -6,7 +6,7 @@
 namespace Core::Features::NativeCaller
 {
 	inline uintptr_t g_pointer_to_handle = 0;
-	inline uintptr_t g_get_native_handler = 0;
+	inline uintptr_t g_fast_path_map = 0;
 	inline std::atomic<bool> g_initialized{ false };
 	inline std::atomic<bool> g_available{ false };
 	inline std::mutex g_init_mutex;
@@ -107,10 +107,14 @@ namespace Core::Features::NativeCaller
 			return false;
 		}
 
-		g_get_native_handler = Mem.FindSignatureStr("4C 8B DC 55 56 57 41 57", rage_base, rage_size);
-		if (!g_get_native_handler)
+		const uintptr_t map_lea = Mem.FindSignatureStr(
+			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ? 4C 8B 4C 24",
+			rage_base,
+			rage_size);
+		if (map_lea)
 		{
-			g_get_native_handler = Mem.FindSignatureStr("40 55 56 57 48 83 EC", rage_base, rage_size);
+			const int32_t displacement = Mem.Read<int32_t>(map_lea + 3);
+			g_fast_path_map = map_lea + 7 + displacement;
 		}
 
 		g_pointer_to_handle = Mem.FindSignatureStr(
@@ -118,7 +122,7 @@ namespace Core::Features::NativeCaller
 			Mem.ModBase,
 			Mem.ModBaseSize);
 
-		g_available.store(g_get_native_handler != 0 && g_pointer_to_handle != 0);
+		g_available.store(g_fast_path_map != 0 && g_pointer_to_handle != 0);
 		return g_available.load();
 	}
 
@@ -137,10 +141,27 @@ namespace Core::Features::NativeCaller
 
 	inline uintptr_t GetNativeHandler(uint64_t hash)
 	{
-		if (!Initialize())
+		if (!Initialize() || !g_fast_path_map)
 			return 0;
 
-		return static_cast<uintptr_t>(RemoteCall2(g_get_native_handler, hash, hash));
+		// MSVC std::unordered_map layout: the _List head is at offset 0, and
+		// each node stores _Next/_Prev followed by the pair<NativeHash, handler>.
+		const uintptr_t head = Mem.Read<uintptr_t>(g_fast_path_map);
+		if (!head)
+			return 0;
+
+		uintptr_t node = Mem.Read<uintptr_t>(head);
+		int safety = 0;
+		while (node && node != head && safety++ < 200000)
+		{
+			const uint64_t key = Mem.Read<uint64_t>(node + 0x10);
+			if (key == hash)
+				return Mem.Read<uintptr_t>(node + 0x18);
+
+			node = Mem.Read<uintptr_t>(node);
+		}
+
+		return 0;
 	}
 
 	inline bool InvokeNative(uint64_t hash, const std::vector<uint64_t>& args, uint64_t* result = nullptr)
