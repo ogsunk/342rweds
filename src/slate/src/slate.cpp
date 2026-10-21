@@ -5776,6 +5776,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                         SetCursorPosY(GetCursorPosY() + 9.f ds);
                         TextColored(g_style->col(pcol_text), "Sunkets");
                         SameLine(0, 0);
+                        SetCursorPosY(GetCursorPosY() + 2.f ds);
                         TextColored(g_style->col(pcol_scheme), "Ware");
                     }
                     EndGroup();
