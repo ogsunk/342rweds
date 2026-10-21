@@ -6221,14 +6221,19 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_EYE__BOLT, "Experimental Natives", &g_Config.General->NativeFeatures);
                 if (widgets->button("Test Native Caller", { 180 ds, 26 ds })) {
                     if (!g_Config.General->NativeFeatures) {
-                        NotifyManager::Send("Enable Experimental Natives first", 260.0f);
+                        NotifyManager::Send("Enable Experimental Natives first", 300.0f);
                     }
                     else if (!Core::Features::NativeCaller::IsAvailable()) {
-                        NotifyManager::Send("Native caller unavailable", 260.0f);
+                        NotifyManager::Send("Native caller unavailable", 300.0f);
                     }
                     else {
+                        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(
+                            reinterpret_cast<uintptr_t>(Core::SDK::Pointers::pLocalPlayer));
                         const uintptr_t handler = Core::Features::NativeCaller::GetNativeHandler(0xAE99FB955581844Aull);
-                        NotifyManager::Send(handler ? "Native handler OK" : "Native handler not found", 260.0f);
+                        const std::string status =
+                            std::string("Native ready | handle=") + (handle ? "yes" : "no") +
+                            " | handler=" + (handler ? "yes" : "no");
+                        NotifyManager::Send(status.c_str(), 400.0f);
                     }
                 }
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
