@@ -2517,7 +2517,18 @@ namespace {
         draw->AddLine(torso_bottom, right_leg, outline, 9 ds);
     }
 
-    void draw_ped_hitbox_selector(const char* str_id, bool* values, int value_count, const ped_hitbox_point_t* points, int point_count, bool selector_active) {
+    void draw_ped_hitbox_selector(
+        const char* str_id,
+        bool* values,
+        int value_count,
+        const ped_hitbox_point_t* points,
+        int point_count,
+        bool selector_active,
+        bool show_fov = false,
+        int fov_x = 0,
+        int fov_y = 0,
+        bool fov_filled = false,
+        ImColor fov_color = ImColor(255, 255, 255, 255)) {
         auto* window = GetCurrentWindow();
         auto* draw = window->DrawList;
 
@@ -2548,9 +2559,10 @@ namespace {
         ImRect image_area{ image_panel.Min + ImVec2{ 10 ds, 10 ds }, image_panel.Max - ImVec2{ 10 ds, 10 ds } };
         ImRect ped_rect = image_area;
 
-        if (ped_hitbox_photo.w > 0.f && ped_hitbox_photo.h > 0.f) {
-            constexpr ImVec2 uv_min{ 698.0f / 2084.0f, 116.0f / 2084.0f };
-            constexpr ImVec2 uv_max{ 1329.0f / 2084.0f, 1944.0f / 2084.0f };
+        if (ped_hitbox_photo.w > 0.f && ped_hitbox_photo.h > 0.f &&
+            static_cast<bool>(static_cast<ImTextureID>(ped_hitbox_photo))) {
+            constexpr ImVec2 uv_min{ 0.0f, 0.0f };
+            constexpr ImVec2 uv_max{ 1.0f, 1.0f };
 
             const float cropped_width = ped_hitbox_photo.w * (uv_max.x - uv_min.x);
             const float cropped_height = ped_hitbox_photo.h * (uv_max.y - uv_min.y);
@@ -2564,6 +2576,41 @@ namespace {
             draw->AddImage(ped_hitbox_photo, ped_rect.Min, ped_rect.Max, uv_min, uv_max, g_style->col(pcol_text, 0.96f));
         } else {
             draw_ped_hitbox_fallback(draw, image_area);
+        }
+
+        if (show_fov && fov_x > 0 && fov_y > 0) {
+            const ImVec2 center = ped_rect.GetCenter();
+            const float radius_x = ImClamp(
+                image_area.GetWidth() * (static_cast<float>(fov_x) / 500.0f),
+                8.0f,
+                image_area.GetWidth() * 0.95f);
+            const float radius_y = ImClamp(
+                image_area.GetHeight() * (static_cast<float>(fov_y) / 500.0f),
+                8.0f,
+                image_area.GetHeight() * 0.95f);
+
+            const ImVec4 color = ImVec4(
+                fov_color.Value.x,
+                fov_color.Value.y,
+                fov_color.Value.z,
+                fov_color.Value.w * GImGui->Style.Alpha);
+
+            if (fov_filled) {
+                draw->AddEllipseFilled(
+                    center,
+                    ImVec2{ radius_x, radius_y },
+                    GetColorU32(ImVec4{ color.x, color.y, color.z, color.w * 0.18f }),
+                    0.0f,
+                    64);
+            }
+
+            draw->AddEllipse(
+                center,
+                ImVec2{ radius_x, radius_y },
+                GetColorU32(color),
+                0.0f,
+                64,
+                2.0f);
         }
 
         bool hovered_points[12]{ };
@@ -2662,9 +2709,10 @@ namespace {
             ImVec2{ image_area.GetCenter().x + preview_box_width * 0.5f, image_area.GetCenter().y + preview_box_height * 0.5f }
         };
 
-        if (ped_hitbox_photo.w > 0.f && ped_hitbox_photo.h > 0.f) {
-            constexpr ImVec2 uv_min{ 698.0f / 2084.0f, 116.0f / 2084.0f };
-            constexpr ImVec2 uv_max{ 1329.0f / 2084.0f, 1944.0f / 2084.0f };
+        if (ped_hitbox_photo.w > 0.f && ped_hitbox_photo.h > 0.f &&
+            static_cast<bool>(static_cast<ImTextureID>(ped_hitbox_photo))) {
+            constexpr ImVec2 uv_min{ 0.0f, 0.0f };
+            constexpr ImVec2 uv_max{ 1.0f, 1.0f };
 
             const float cropped_width = ped_hitbox_photo.w * (uv_max.x - uv_min.x);
             const float cropped_height = ped_hitbox_photo.h * (uv_max.y - uv_min.y);
@@ -4431,7 +4479,30 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
     // load_menu_logo_texture(device, menu_season_t::Winter);
     // load_menu_logo_texture(device, menu_season_t::Christmas);
     // load_menu_logo_texture(device, menu_season_t::Easter);
-    // ped_hitbox_photo.load(device, pedhitbox, sizeof(pedhitbox));
+
+    // Ported SunketsWare ped silhouette used by the ESP preview and the
+    // aimbot/silent-aim hitbox selectors.
+    if (ped_hitbox_photo.w <= 0.f) {
+        ped_hitbox_photo.load(device, silent_esp, sizeof(silent_esp));
+        // D3DX may leave the load-info dimensions at zero when no thread pump
+        // is supplied. The embedded SunketsWare silhouette is 199x394.
+        if (ped_hitbox_photo.w <= 0.f || ped_hitbox_photo.h <= 0.f) {
+            ped_hitbox_photo.w = 199.0f;
+            ped_hitbox_photo.h = 394.0f;
+        }
+    }
+
+    if (!Custom::g_EspPreviewTexture) {
+        D3DX11_IMAGE_LOAD_INFO preview_info{};
+        D3DX11CreateShaderResourceViewFromMemory(
+            device,
+            silent_esp,
+            sizeof(silent_esp),
+            &preview_info,
+            nullptr,
+            &Custom::g_EspPreviewTexture,
+            nullptr);
+    }
 
     widgets->nav.tabs = {
         { I_CURRENT__LOCATION, "Combat", { { I_SETTINGS, "Aimbot" }, { I_SWORD, "SilentAim" }, { I_DOTS, "TriggerBot" } } },
@@ -6108,7 +6179,6 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                     widgets->spacing(0 ds);
                     BeginChild("preview_content", vec2{ 0, 0 }, 2, 128);
                     {
-                        draw_esp_preview_ped();
                         Custom::g_EspPreview.DragDropHandler();
                         Custom::g_EspPreview.Draw();
                     }
@@ -6152,7 +6222,18 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                                 g_Config.Aimbot->BoneGroup_Feet
                             };
 
-                            draw_ped_hitbox_selector("##hitboxes", aimbot_selector_values, IM_ARRAYSIZE(aimbot_selector_values), aimbot_hitbox_points, IM_ARRAYSIZE(aimbot_hitbox_points), g_Config.Aimbot->Enabled);
+                            draw_ped_hitbox_selector(
+                                "##hitboxes",
+                                aimbot_selector_values,
+                                IM_ARRAYSIZE(aimbot_selector_values),
+                                aimbot_hitbox_points,
+                                IM_ARRAYSIZE(aimbot_hitbox_points),
+                                g_Config.Aimbot->Enabled,
+                                g_Config.Aimbot->ShowFov,
+                                g_Config.Aimbot->FOVX,
+                                g_Config.Aimbot->FOVY,
+                                g_Config.Aimbot->FovFilled,
+                                g_Config.Aimbot->FovColor);
 
                             g_Config.Aimbot->BoneGroup_Head = aimbot_selector_values[0];
                             g_Config.Aimbot->BoneGroup_Neck = aimbot_selector_values[1];
@@ -6171,7 +6252,18 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                                 g_Config.SilentAim->BoneGroup_Wheels
                             };
 
-                            draw_ped_hitbox_selector("##hitboxes", silentaim_selector_values, IM_ARRAYSIZE(silentaim_selector_values), silentaim_hitbox_points, IM_ARRAYSIZE(silentaim_hitbox_points), g_Config.SilentAim->Enabled);
+                            draw_ped_hitbox_selector(
+                                "##hitboxes",
+                                silentaim_selector_values,
+                                IM_ARRAYSIZE(silentaim_selector_values),
+                                silentaim_hitbox_points,
+                                IM_ARRAYSIZE(silentaim_hitbox_points),
+                                g_Config.SilentAim->Enabled,
+                                g_Config.SilentAim->ShowFov,
+                                g_Config.SilentAim->FOVX,
+                                g_Config.SilentAim->FOVY,
+                                g_Config.SilentAim->FovFilled,
+                                g_Config.SilentAim->FovColor);
 
                             g_Config.SilentAim->BoneGroup_Head = silentaim_selector_values[0];
                             g_Config.SilentAim->BoneGroup_Neck = silentaim_selector_values[1];

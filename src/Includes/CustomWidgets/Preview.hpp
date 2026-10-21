@@ -1,9 +1,12 @@
 #pragma once
 #include <Includes/Includes.hpp>
+#include "../../slate/resources/silent_esp_texture.h"
 using namespace Core;
 
 namespace Custom
 {
+	inline ID3D11ShaderResourceView* g_EspPreviewTexture = nullptr;
+
 	class EspPreview {
 	public:
 		void DragDropHandler( )
@@ -71,6 +74,20 @@ namespace Custom
 				{ImVec2( iBox_X - attach_gap, iBox_Y )}, // Left
 			};
 
+			// SunketsWare ped silhouette. This is the base layer from the
+			// reference project; ESP features are drawn over it.
+			if ( g_EspPreviewTexture )
+			{
+				const float alpha = ImGui::GetStyle( ).Alpha;
+				ImGui::GetWindowDrawList( )->AddImage(
+					( ImTextureID ) g_EspPreviewTexture,
+					ImVec2( iBox_X, iBox_Y ),
+					ImVec2( iBox_X + iBox_Width, iBox_Y + iBox_Height ),
+					ImVec2( 0, 0 ),
+					ImVec2( 1, 1 ),
+					IM_COL32( 255, 255, 255, ( int ) ( 255 * alpha ) ) );
+			}
+
 			static float BoxAnimation = 0.f;
 			BoxAnimation = ImClamp( BoxAnimation + ( 6 * ImGui::GetIO( ).DeltaTime * ( g_Config.ESP->Box ? 1.f : -1.f ) ), 0.f, g_Config.ESP->BoxCol.Value.w );
 
@@ -84,8 +101,9 @@ namespace Custom
 
 			if ( BoxAnimation != 0 )
 			{
-				ImGui::GetWindowDrawList( )->AddRect( ImVec2( iBox_X, iBox_Y ), ImVec2( iBox_X + iBox_Width, iBox_Y + iBox_Height ), ImColor( 0, 0, 0, ( int ) ( ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) * BoxAnimation ) ), 0, ImDrawFlags_None, 2 );
-				ImGui::GetWindowDrawList( )->AddRect( ImVec2( iBox_X, iBox_Y ), ImVec2( iBox_X + iBox_Width, iBox_Y + iBox_Height ), ImColor( ( int ) g_Config.ESP->BoxCol.Value.x * 255, ( int ) g_Config.ESP->BoxCol.Value.y * 255, ( int ) g_Config.ESP->BoxCol.Value.z * 255, ( int ) ( ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) * BoxAnimation ) ), 0, ImDrawFlags_None );
+				const float box_thickness = ImMax( 1.0f, g_Config.ESP->BoxThickness );
+				ImGui::GetWindowDrawList( )->AddRect( ImVec2( iBox_X, iBox_Y ), ImVec2( iBox_X + iBox_Width, iBox_Y + iBox_Height ), ImColor( 0, 0, 0, ( int ) ( ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) * BoxAnimation ) ), 0, ImDrawFlags_None, box_thickness + 1.0f );
+				ImGui::GetWindowDrawList( )->AddRect( ImVec2( iBox_X, iBox_Y ), ImVec2( iBox_X + iBox_Width, iBox_Y + iBox_Height ), ImColor( ( int ) g_Config.ESP->BoxCol.Value.x * 255, ( int ) g_Config.ESP->BoxCol.Value.y * 255, ( int ) g_Config.ESP->BoxCol.Value.z * 255, ( int ) ( ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) * BoxAnimation ) ), 0, ImDrawFlags_None, box_thickness );
 			}
 
 			static float SkeletonAnimation = 0.f;
@@ -93,7 +111,9 @@ namespace Custom
 
 			if ( SkeletonAnimation != 0 )
 			{
-				ImColor skelCol = g_Config.ESP->SkeletonCol;
+				ImColor skelCol = g_Config.ESP->SkeletonVisibilityColor
+					? g_Config.ESP->VisibleCol
+					: g_Config.ESP->SkeletonCol;
 				ImColor drawCol(
 					( int ) ( skelCol.Value.x * 255.f ),
 					( int ) ( skelCol.Value.y * 255.f ),
@@ -181,6 +201,26 @@ namespace Custom
 				ImGui::GetWindowDrawList( )->AddCircleFilled( boxC, 3.0f, ImColor( ( int ) ( fc.Value.x * 255.f ), ( int ) ( fc.Value.y * 255.f ), ( int ) ( fc.Value.z * 255.f ), ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) ), 24 );
 			}
 
+			if ( g_Config.ESP->Targets )
+			{
+				const ImVec2 head{ iBox_X + iBox_Width * 0.5f, iBox_Y + 4.0f };
+				ImGui::GetWindowDrawList( )->AddTriangleFilled(
+					ImVec2{ head.x, head.y + 8.0f },
+					ImVec2{ head.x - 5.0f, head.y },
+					ImVec2{ head.x + 5.0f, head.y },
+					ImColor( g_Config.ESP->TargetCol.Value.x, g_Config.ESP->TargetCol.Value.y, g_Config.ESP->TargetCol.Value.z, ImGui::GetStyle( ).Alpha ) );
+			}
+
+			if ( g_Config.ESP->ShowPassive )
+			{
+				const char* passive_text = "PASSIVE";
+				const ImVec2 passive_size = ImGui::CalcTextSize( passive_text );
+				ImGui::GetWindowDrawList( )->AddText(
+					ImVec2{ iBox_X + iBox_Width * 0.5f - passive_size.x * 0.5f, iBox_Y + iBox_Height - passive_size.y - 2.0f },
+					ImColor( g_Config.ESP->TargetCol.Value.x, g_Config.ESP->TargetCol.Value.y, g_Config.ESP->TargetCol.Value.z, ImGui::GetStyle( ).Alpha ),
+					passive_text );
+			}
+
 			for ( size_t i = 0; i < mWidgets.size( ); i++ )
 			{
 				auto & Widget = mWidgets.at( i );
@@ -218,10 +258,16 @@ namespace Custom
 				{
 				case 0:
 					Widget.Enabled = g_Config.ESP->HealthBar;
+					Widget.Color = g_Config.ESP->HealthBarGradient
+						? g_Config.ESP->HealthBarGradientStart
+						: ImColor( 66, 245, 132 );
 					g_Config.ESP->HealthBarPos = Widget.RawPos;
 					break;
 				case 1:
 					Widget.Enabled = g_Config.ESP->ArmorBar;
+					Widget.Color = g_Config.ESP->ArmorBarGradient
+						? g_Config.ESP->ArmorBarGradientStart
+						: ImColor( 85, 128, 200 );
 					g_Config.ESP->ArmorBarPos = Widget.RawPos;
 					break;
 				case 2:
