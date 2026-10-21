@@ -1730,7 +1730,7 @@ namespace {
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##player_directory_entries", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##player_directory_entries", { 0, 260 ds }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& entity : filtered_players) {
                         const bool is_selected = has_selected_player &&
                             (selected_player.Id == entity.Id || selected_player.Ped == entity.Ped);
@@ -1800,7 +1800,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -1856,7 +1856,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
@@ -5136,7 +5136,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##vehicle_directory_entries", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##vehicle_directory_entries", { 0, 260 ds }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& vehicle : filtered_vehicles) {
                         const bool is_selected = has_selected_vehicle && selected_vehicle.Pointer == vehicle.Pointer;
                         const bool locked = is_vehicle_locked(vehicle);
@@ -5199,7 +5199,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         if (all_vehicles.empty()) {
                             draw_player_empty_state(I_CAR, "No Actions", "Vehicle actions unlock when a streamed vehicle exists.");
@@ -5259,7 +5259,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_vehicle_actions", { 0, GetContentRegionAvail().y }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_vehicle_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         Text("Actions");
 
