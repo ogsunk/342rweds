@@ -2180,6 +2180,141 @@ namespace {
         NotifyManager::Send("Armor given (native)", 220.0f);
     }
 
+    // ---- Vehicle natives -------------------------------------------------
+
+    bool native_delete_vehicle(uintptr_t vehicle) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        // DELETE_VEHICLE takes a pointer to the handle, so stage the handle in
+        // the target process and pass its address.
+        const uintptr_t block = Mem.AllocateExecutableMemory(8);
+        if (!block) {
+            return false;
+        }
+        Mem.Write<uint32_t>(block, handle);
+        Mem.Write<uint32_t>(block + 4, 0);
+
+        const bool ok = Core::Features::NativeCaller::InvokeNative(0xEA386986E786A54Full, { block });
+        VirtualFreeEx(Mem.ProcHandle, reinterpret_cast<LPVOID>(block), 0, MEM_RELEASE);
+        return ok;
+    }
+
+    bool native_smash_vehicle_windows(uintptr_t vehicle) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        bool ok = true;
+        for (int index = 0; index < 8; ++index) {
+            ok = Core::Features::NativeCaller::InvokeNative(0x9E5B5E4D2CCD2259ull, { handle, static_cast<uint64_t>(index) }) && ok;
+        }
+        return ok;
+    }
+
+    bool native_pop_vehicle_tires(uintptr_t vehicle) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        bool ok = true;
+        for (int index = 0; index < 8; ++index) {
+            const std::vector<uint64_t> args = {
+                handle,
+                static_cast<uint64_t>(index),
+                0,
+                Core::Features::NativeCaller::FloatBits(0.0f)
+            };
+            ok = Core::Features::NativeCaller::InvokeNative(0xEC6A202EE4960385ull, args) && ok;
+        }
+        return ok;
+    }
+
+    bool native_set_vehicle_undriveable(uintptr_t vehicle, bool toggle) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x8ABA6AF54B942B95ull, { handle, toggle ? 1ull : 0ull });
+    }
+
+    bool native_set_vehicle_engine_on(uintptr_t vehicle, bool on) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x2497C4717C8B881Eull, { handle, on ? 1ull : 0ull, 1ull, 1ull });
+    }
+
+    bool native_set_vehicle_alarm(uintptr_t vehicle, bool state) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0xCDE5E70C1DDB954Cull, { handle, state ? 1ull : 0ull });
+    }
+
+    // Eject the occupant of a seat. seatIndex -1 is the driver, 0+ are passengers.
+    bool native_eject_ped_from_seat(uintptr_t vehicle, int seat_index) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t vehicle_handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!vehicle_handle) {
+            return false;
+        }
+
+        uint64_t ped_result = 0;
+        const std::vector<uint64_t> lookup_args = {
+            vehicle_handle,
+            static_cast<uint64_t>(static_cast<int64_t>(seat_index)),
+            0
+        };
+        if (!Core::Features::NativeCaller::InvokeNative(0xBB40DD2270B65366ull, lookup_args, &ped_result)) {
+            return false;
+        }
+
+        const uint32_t ped_handle = static_cast<uint32_t>(ped_result);
+        if (!ped_handle) {
+            return false;
+        }
+
+        // TASK_LEAVE_VEHICLE asks the ped to exit. (Task native; see notes.)
+        return Core::Features::NativeCaller::InvokeNative(0xD3DBCE61A490BE02ull, { ped_handle, vehicle_handle, 0 });
+    }
+
     void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);
     void lift_local_vehicle_on_target(const Core::SDK::Game::EntityStruct& entity);
 
@@ -5971,6 +6106,50 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         action_button("Explode", "Explode Vehicle", [&] {
                             if (!native_explode_vehicle(selected_vehicle)) {
                                 explode_vehicle(selected_vehicle);
+                            }
+                            });
+                        action_button("Delete", "Delete Vehicle", [&] {
+                            if (!native_delete_vehicle(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer))) {
+                                NotifyManager::Send("Delete vehicle unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Eject D", "Eject Driver", [&] {
+                            if (!native_eject_ped_from_seat(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), -1)) {
+                                NotifyManager::Send("Eject driver unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Eject P", "Eject Passenger", [&] {
+                            bool any = false;
+                            for (int seat = 0; seat < 3; ++seat) {
+                                any = native_eject_ped_from_seat(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), seat) || any;
+                            }
+                            if (!any) {
+                                NotifyManager::Send("Eject passenger unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Windows", "Smash All Windows", [&] {
+                            if (!native_smash_vehicle_windows(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer))) {
+                                NotifyManager::Send("Smash windows unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Tires", "Pop All Tires", [&] {
+                            if (!native_pop_vehicle_tires(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer))) {
+                                NotifyManager::Send("Pop tires unavailable", 220.0f);
+                            }
+                            });
+                        action_button("NoDrive", "Disable Driving / Steering", [&] {
+                            if (!native_set_vehicle_undriveable(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), true)) {
+                                NotifyManager::Send("Disable drive unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Engine", "Kill Engine", [&] {
+                            if (!native_set_vehicle_engine_on(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), false)) {
+                                NotifyManager::Send("Kill engine unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Alarm", "Trigger Alarm", [&] {
+                            if (!native_set_vehicle_alarm(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), true)) {
+                                NotifyManager::Send("Alarm unavailable", 220.0f);
                             }
                             });
                         action_button("Name", "Copy Vehicle Name", [&] { copy_player_value_to_clipboard(get_vehicle_display_name(selected_vehicle), "Vehicle name copied", "Vehicle name unavailable"); });
