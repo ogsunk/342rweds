@@ -2311,8 +2311,17 @@ namespace {
             return false;
         }
 
-        // TASK_LEAVE_VEHICLE asks the ped to exit. (Task native; see notes.)
-        return Core::Features::NativeCaller::InvokeNative(0xD3DBCE61A490BE02ull, { ped_handle, vehicle_handle, 0 });
+        // Deliberately NOT TASK_LEAVE_VEHICLE: it is a task native and crashes
+        // when called from an external thread. Move the occupant out instead.
+        const D3DXVECTOR3 position = reinterpret_cast<CVehicle*>(vehicle)->GetPos();
+        const std::vector<uint64_t> move_args = {
+            ped_handle,
+            Core::Features::NativeCaller::FloatBits(position.x + 3.0f),
+            Core::Features::NativeCaller::FloatBits(position.y + 3.0f),
+            Core::Features::NativeCaller::FloatBits(position.z + 1.0f),
+            0, 0, 0, 1
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x06843DA7060A026Bull, move_args);
     }
 
     void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);

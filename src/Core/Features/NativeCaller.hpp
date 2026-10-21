@@ -319,40 +319,61 @@ namespace Core::Features::NativeCaller
 		return 0;
 	}
 
+	// The attached process name (FiveM_b3758_GTAProcess.exe) is authoritative:
+	// CitizenFX.ini can be stale and g_Offsets is zeroed during re-attaches.
+	inline int BuildFromProcessName()
+	{
+		const std::string& name = Mem.ProcName2;
+		const size_t marker = name.find("_b");
+		if (marker == std::string::npos)
+			return 0;
+
+		size_t i = marker + 2;
+		int value = 0;
+		while (i < name.size() && name[i] >= '0' && name[i] <= '9')
+		{
+			value = value * 10 + (name[i] - '0');
+			++i;
+		}
+		return value;
+	}
+
 	inline int CurrentBuild()
 	{
-		int build = g_Offsets.CurrentBuild;
+		int build = BuildFromProcessName();
 		if (build > 0)
 		{
 			g_cached_build.store(build);
 			return build;
 		}
 
-		// ClearOffsets() zeroes g_Offsets mid-session, so keep the last build we
-		// saw and fall back to parsing the attached process name.
-		build = g_cached_build.load();
+		build = g_Offsets.CurrentBuild;
 		if (build > 0)
-			return build;
-
-		const std::string& name = Mem.ProcName2;
-		const size_t marker = name.find("_b");
-		if (marker != std::string::npos)
 		{
-			size_t i = marker + 2;
-			int value = 0;
-			while (i < name.size() && name[i] >= '0' && name[i] <= '9')
-			{
-				value = value * 10 + (name[i] - '0');
-				++i;
-			}
-			if (value > 0)
-			{
-				g_cached_build.store(value);
-				return value;
-			}
+			g_cached_build.store(build);
+			return build;
 		}
 
-		return 0;
+		return g_cached_build.load();
+	}
+
+	// Guard every entity access: a streamed-out/stale entity pointer is the most
+	// common cause of a crash when invoking a native.
+	inline bool IsReadable(uintptr_t address, size_t size = 8)
+	{
+		if (!address || !Mem.ProcHandle)
+			return false;
+
+		MEMORY_BASIC_INFORMATION mbi{};
+		if (!VirtualQueryEx(Mem.ProcHandle, reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)))
+			return false;
+
+		if (mbi.State != MEM_COMMIT)
+			return false;
+		if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))
+			return false;
+
+		return (reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize) >= (address + size);
 	}
 
 	inline bool Initialize()
@@ -529,7 +550,7 @@ namespace Core::Features::NativeCaller
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
 	{
-		if (!Initialize())
+		if (!Initialize() || !IsReadable(entity))
 			return 0;
 
 		return static_cast<uint32_t>(RemoteCall1(g_pointer_to_handle, entity));
