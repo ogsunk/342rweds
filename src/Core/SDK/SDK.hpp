@@ -14,6 +14,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <mutex>
+#include <atomic>
 
 namespace Core {
     namespace SDK {
@@ -86,6 +87,10 @@ namespace Core {
             };
             inline std::vector<EntityStruct> EntityList;
             inline std::vector<VehicleStructure> VehicleList;
+            // Set by the Player List / Vehicle List tabs so ESP can draw a
+            // blinking locator dot on the currently selected entity.
+            inline std::atomic<uintptr_t> SelectedPlayer{ 0 };
+            inline std::atomic<uintptr_t> SelectedVehicle{ 0 };
             inline std::unordered_map<CPed*, bool> FriendMap;
             inline std::vector<CPed*> FriendList;
             inline std::mutex FriendMutex;

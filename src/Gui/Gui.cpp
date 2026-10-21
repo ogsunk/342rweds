@@ -497,6 +497,7 @@ void Gui::Rendering()
 					ImGui::PushFont(g_Variables.m_DrawFont);
 					Features::g_Esp.Draw();
 					Features::g_Esp.DrawVehicle();
+					Features::g_Esp.DrawSelectionIndicators();
 					Features::g_Esp.Observers();
 					ImGui::PopFont();
 				}

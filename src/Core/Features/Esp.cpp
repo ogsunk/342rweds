@@ -381,6 +381,132 @@ void Core::Features::cEsp::Observers()
 	}
 }
 
+struct vehicle_bounds_cache_entry_t
+	{
+		std::chrono::steady_clock::time_point updated{};
+		D3DXVECTOR3 min{};
+		D3DXVECTOR3 max{};
+		bool valid = false;
+	};
+
+	std::unordered_map<uintptr_t, vehicle_bounds_cache_entry_t> g_vehicle_bounds_cache;
+
+	bool get_vehicle_world_bounds(CVehicle* vehicle, D3DXVECTOR3& outMin, D3DXVECTOR3& outMax)
+	{
+		if (!vehicle)
+			return false;
+
+		const uintptr_t key = reinterpret_cast<uintptr_t>(vehicle);
+		const auto now = std::chrono::steady_clock::now();
+		auto cached = g_vehicle_bounds_cache.find(key);
+		if (cached != g_vehicle_bounds_cache.end() &&
+			(now - cached->second.updated) < std::chrono::milliseconds(400))
+		{
+			if (!cached->second.valid)
+				return false;
+
+			outMin = cached->second.min;
+			outMax = cached->second.max;
+			return true;
+		}
+
+		vehicle_bounds_cache_entry_t entry{};
+		entry.updated = now;
+
+		const auto wheels = Core::SDK::Game::getVehicleWheels(key);
+		if (wheels.size() >= 2)
+		{
+			float minX = FLT_MAX, minY = FLT_MAX, minZ = FLT_MAX;
+			float maxX = -FLT_MAX, maxY = -FLT_MAX, maxZ = -FLT_MAX;
+
+			for (const auto& wheel : wheels)
+			{
+				minX = std::min(minX, wheel.x);
+				minY = std::min(minY, wheel.y);
+				minZ = std::min(minZ, wheel.z);
+				maxX = std::max(maxX, wheel.x);
+				maxY = std::max(maxY, wheel.y);
+				maxZ = std::max(maxZ, wheel.z);
+			}
+
+			const D3DXVECTOR3 vehiclePos = vehicle->GetPos();
+			minX = std::min(minX, vehiclePos.x);
+			minY = std::min(minY, vehiclePos.y);
+			maxX = std::max(maxX, vehiclePos.x);
+			maxY = std::max(maxY, vehiclePos.y);
+
+			constexpr float padXY = 0.18f;
+			minX -= padXY;
+			maxX += padXY;
+			minY -= padXY;
+			maxY += padXY;
+
+			// Wheel bones sit near the axle center. Extend down to the tyre
+			// contact patch and up to a typical vehicle roof.
+			entry.min = D3DXVECTOR3(minX, minY, minZ - 0.45f);
+			entry.max = D3DXVECTOR3(maxX, maxY, maxZ + 1.55f);
+			entry.valid = true;
+		}
+
+		if (g_vehicle_bounds_cache.size() > 256)
+			g_vehicle_bounds_cache.clear();
+
+		g_vehicle_bounds_cache[key] = entry;
+
+		if (!entry.valid)
+			return false;
+
+		outMin = entry.min;
+		outMax = entry.max;
+		return true;
+	}
+
+	void draw_selection_dot(ImDrawList* drawList, const ImVec2& position)
+	{
+		const float blink = 0.5f + 0.5f * std::sin((float)ImGui::GetTime() * 7.0f);
+		drawList->AddCircleFilled(position, 7.0f, IM_COL32(0, 0, 0, 210), 24);
+		drawList->AddCircleFilled(position, 5.0f, IM_COL32(255, 30, 30, 90 + (int)(165.0f * blink)), 24);
+		drawList->AddCircle(position, 8.0f + 3.0f * blink, IM_COL32(255, 60, 60, 60 + (int)(110.0f * blink)), 32, 1.5f);
+	}
+
+void Core::Features::cEsp::DrawSelectionIndicators()
+{
+	auto* drawList = ImGui::GetBackgroundDrawList();
+
+	const uintptr_t selectedPlayer = Core::SDK::Game::SelectedPlayer.load();
+	if (selectedPlayer)
+	{
+		const auto entities = Core::SDK::Game::GetEntityListSnapshot();
+		for (const auto& entity : entities)
+		{
+			if (reinterpret_cast<uintptr_t>(entity.Ped) != selectedPlayer)
+				continue;
+
+			const D3DXVECTOR2 screenPos = Core::SDK::Game::WorldToScreen(
+				entity.Ped->GetPos() + D3DXVECTOR3(0.0f, 0.0f, 1.0f));
+			if (Core::SDK::Game::IsOnScreen(screenPos))
+				draw_selection_dot(drawList, ImVec2(screenPos.x, screenPos.y));
+			break;
+		}
+	}
+
+	const uintptr_t selectedVehicle = Core::SDK::Game::SelectedVehicle.load();
+	if (selectedVehicle)
+	{
+		for (const auto& entity : Core::SDK::Game::VehicleList)
+		{
+			if (reinterpret_cast<uintptr_t>(entity.Pointer) != selectedVehicle)
+				continue;
+
+			const D3DXVECTOR2 screenPos = Core::SDK::Game::WorldToScreen(
+				entity.Pointer->GetPos() + D3DXVECTOR3(0.0f, 0.0f, 0.9f));
+			if (Core::SDK::Game::IsOnScreen(screenPos))
+				draw_selection_dot(drawList, ImVec2(screenPos.x, screenPos.y));
+			break;
+		}
+	}
+}
+
 void Core::Features::cEsp::Draw()
 {
 	auto Cfg = g_Config.ESP;
@@ -1455,6 +1581,7 @@ void Core::Features::cEsp::Draw()
 			}
 
 		}
+
 	}
 }
 
@@ -1493,33 +1620,80 @@ void Core::Features::cEsp::DrawVehicle()
 
 		if (Cfg.Box)
 		{
-			const D3DXVECTOR2 VehicleTop = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, 1.6f));
-			const D3DXVECTOR2 VehicleBottom = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, -0.2f));
-
-			float BoxHeight = 0.0f;
-			float BoxTopY = 0.0f;
-			float BoxBottomY = 0.0f;
-			if (VehicleTop != D3DXVECTOR2(0.0f, 0.0f) && VehicleBottom != D3DXVECTOR2(0.0f, 0.0f))
+			bool drewBox = false;
+			D3DXVECTOR3 boundsMin{};
+			D3DXVECTOR3 boundsMax{};
+			if (get_vehicle_world_bounds(Vehicle, boundsMin, boundsMax))
 			{
-				BoxHeight = std::abs(VehicleBottom.y - VehicleTop.y);
-				BoxTopY = ImMin(VehicleTop.y, VehicleBottom.y);
-				BoxBottomY = ImMax(VehicleTop.y, VehicleBottom.y);
+				const D3DXVECTOR3 corners[8] = {
+					D3DXVECTOR3(boundsMin.x, boundsMin.y, boundsMin.z),
+					D3DXVECTOR3(boundsMax.x, boundsMin.y, boundsMin.z),
+					D3DXVECTOR3(boundsMin.x, boundsMax.y, boundsMin.z),
+					D3DXVECTOR3(boundsMax.x, boundsMax.y, boundsMin.z),
+					D3DXVECTOR3(boundsMin.x, boundsMin.y, boundsMax.z),
+					D3DXVECTOR3(boundsMax.x, boundsMin.y, boundsMax.z),
+					D3DXVECTOR3(boundsMin.x, boundsMax.y, boundsMax.z),
+					D3DXVECTOR3(boundsMax.x, boundsMax.y, boundsMax.z)
+				};
+
+				float screenMinX = FLT_MAX, screenMinY = FLT_MAX;
+				float screenMaxX = -FLT_MAX, screenMaxY = -FLT_MAX;
+				bool anyCornerOnScreen = false;
+
+				for (const auto& corner : corners)
+				{
+					const D3DXVECTOR2 screenCorner = Core::SDK::Game::WorldToScreen(corner);
+					if (screenCorner == D3DXVECTOR2(0.0f, 0.0f))
+						continue;
+
+					screenMinX = std::min(screenMinX, screenCorner.x);
+					screenMinY = std::min(screenMinY, screenCorner.y);
+					screenMaxX = std::max(screenMaxX, screenCorner.x);
+					screenMaxY = std::max(screenMaxY, screenCorner.y);
+					anyCornerOnScreen = true;
+				}
+
+				if (anyCornerOnScreen && screenMaxX > screenMinX && screenMaxY > screenMinY)
+				{
+					const ImVec2 boxMin(screenMinX - 2.0f, screenMinY - 2.0f);
+					const ImVec2 boxMax(screenMaxX + 2.0f, screenMaxY + 2.0f);
+					DrawList->AddRect(boxMin, boxMax, ImColor(0, 0, 0, 220), 0.0f, 0, 2.5f);
+					DrawList->AddRect(boxMin, boxMax, Cfg.BoxCol, 0.0f, 0, 1.5f);
+					drewBox = true;
+				}
 			}
 
-			if (BoxHeight < 8.0f)
+			if (!drewBox)
 			{
-				// Fallback for vehicles whose roof point projects off-screen.
-				BoxHeight = ImClamp(2200.0f / ImMax(Distance, 1.0f), 10.0f, 240.0f);
-				BoxTopY = VehicleLocation.y - BoxHeight;
-				BoxBottomY = VehicleLocation.y;
+				// Fallback for vehicles without readable wheel bones (boats,
+				// aircraft, or unstreamed models).
+				const D3DXVECTOR2 VehicleTop = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, 1.6f));
+				const D3DXVECTOR2 VehicleBottom = Core::SDK::Game::WorldToScreen(VehiclePos + D3DXVECTOR3(0.0f, 0.0f, -0.2f));
+
+				float BoxHeight = 0.0f;
+				float BoxTopY = 0.0f;
+				float BoxBottomY = 0.0f;
+				if (VehicleTop != D3DXVECTOR2(0.0f, 0.0f) && VehicleBottom != D3DXVECTOR2(0.0f, 0.0f))
+				{
+					BoxHeight = std::abs(VehicleBottom.y - VehicleTop.y);
+					BoxTopY = ImMin(VehicleTop.y, VehicleBottom.y);
+					BoxBottomY = ImMax(VehicleTop.y, VehicleBottom.y);
+				}
+
+				if (BoxHeight < 8.0f)
+				{
+					BoxHeight = ImClamp(2200.0f / ImMax(Distance, 1.0f), 10.0f, 240.0f);
+					BoxTopY = VehicleLocation.y - BoxHeight;
+					BoxBottomY = VehicleLocation.y;
+				}
+
+				const float BoxWidth = BoxHeight * 1.85f;
+				const ImVec2 BoxMin(VehicleLocation.x - BoxWidth * 0.5f, BoxTopY);
+				const ImVec2 BoxMax(VehicleLocation.x + BoxWidth * 0.5f, BoxBottomY);
+
+				DrawList->AddRect(BoxMin, BoxMax, ImColor(0, 0, 0, 220), 0.0f, 0, 2.5f);
+				DrawList->AddRect(BoxMin, BoxMax, Cfg.BoxCol, 0.0f, 0, 1.5f);
 			}
-
-			const float BoxWidth = BoxHeight * 1.85f;
-			const ImVec2 BoxMin(VehicleLocation.x - BoxWidth * 0.5f, BoxTopY);
-			const ImVec2 BoxMax(VehicleLocation.x + BoxWidth * 0.5f, BoxBottomY);
-
-			DrawList->AddRect(BoxMin, BoxMax, ImColor(0, 0, 0, 220), 0.0f, 0, 2.5f);
-			DrawList->AddRect(BoxMin, BoxMax, Cfg.BoxCol, 0.0f, 0, 1.5f);
 		}
 
 		if (Cfg.VehName)

@@ -1708,6 +1708,9 @@ namespace {
             ui_state.selected_player_id = -1;
         }
 
+        Core::SDK::Game::SelectedPlayer.store(
+            has_selected_player ? reinterpret_cast<uintptr_t>(selected_player.Ped) : 0);
+
         const char* list_title = friends_only ? "Friends" : "Players";
         const char* search_hint = friends_only ? "Search friends..." : "Search players...";
         const char* empty_title = friends_only ? "No friends are currently tracked." : "No players are currently tracked.";
@@ -5121,6 +5124,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         else {
             selected_vehicle_ptr = 0;
         }
+
+        Core::SDK::Game::SelectedVehicle.store(
+            has_selected_vehicle ? reinterpret_cast<uintptr_t>(selected_vehicle.Pointer) : 0);
 
         // Vehicle list on the right, selected vehicle on the left.
         SetCursorPosX(vehicle_directory_column_width + vehicle_directory_gap);
