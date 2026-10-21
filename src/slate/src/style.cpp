@@ -39,9 +39,9 @@ void c_style::setup( ) {
 		themes[0].colors[pcol_bg6] = pcolor{ 15, 15, 15, 1.00f };
         themes[0].colors[pcol_border] = pcolor{ 255, 255, 255, 0.03f };
         themes[0].colors[pcol_scheme] = pcolor{ 199, 199, 199, 1.00f };
-        themes[0].colors[pcol_text] = pcolor{ 231, 231, 231, 1.00f };
-        themes[0].colors[pcol_text2] = pcolor{ 76, 76, 76, 1.00f };
-        themes[0].colors[pcol_text3] = pcolor{ 76, 76, 76, 0.60f };
+        themes[0].colors[pcol_text] = pcolor{ 255, 255, 255, 1.00f };
+        themes[0].colors[pcol_text2] = pcolor{ 255, 255, 255, 1.00f };
+        themes[0].colors[pcol_text3] = pcolor{ 255, 255, 255, 1.00f };
 		themes[0].colors[pcol_tab] = pcolor{ 21, 21, 21 };
 		themes[0].colors[pcol_backdrop] = pcolor{ 255, 255, 255, 0.1f };
 
