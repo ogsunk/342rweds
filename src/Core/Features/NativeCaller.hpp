@@ -77,7 +77,7 @@ namespace Core::Features::NativeCaller
 		Mem.Write<uint64_t>(param + 16, 0);
 
 		std::vector<uint8_t> code;
-		code.reserve(32);
+		code.reserve(48);
 
 		// mov rbx, <param>
 		code.push_back(0x48);
@@ -85,10 +85,14 @@ namespace Core::Features::NativeCaller
 		for (int i = 0; i < 8; ++i)
 			code.push_back(static_cast<uint8_t>((param >> (i * 8)) & 0xFF));
 
+		code.insert(code.end(), { 0x48, 0x89, 0xE5 });       // mov rbp, rsp
+		code.insert(code.end(), { 0x48, 0x83, 0xE4, 0xF0 }); // and rsp, -16
+		code.insert(code.end(), { 0x48, 0x83, 0xEC, 0x20 }); // sub rsp, 0x20 (shadow space)
 		code.insert(code.end(), { 0x48, 0x8B, 0x03 });       // mov rax, [rbx]
 		code.insert(code.end(), { 0x48, 0x8B, 0x4B, 0x08 }); // mov rcx, [rbx+8]
 		code.insert(code.end(), { 0xFF, 0xD0 });             // call rax
 		code.insert(code.end(), { 0x48, 0x89, 0x43, 0x10 }); // mov [rbx+16], rax
+		code.insert(code.end(), { 0x48, 0x89, 0xEC });       // mov rsp, rbp
 		code.push_back(0xC3);                                // ret
 
 		Mem.ExecuteShellcode(code.data(), code.size());
@@ -113,7 +117,7 @@ namespace Core::Features::NativeCaller
 		Mem.Write<uint64_t>(param + 24, 0);
 
 		std::vector<uint8_t> code;
-		code.reserve(40);
+		code.reserve(56);
 
 		// mov rbx, <param>
 		code.push_back(0x48);
@@ -121,11 +125,15 @@ namespace Core::Features::NativeCaller
 		for (int i = 0; i < 8; ++i)
 			code.push_back(static_cast<uint8_t>((param >> (i * 8)) & 0xFF));
 
+		code.insert(code.end(), { 0x48, 0x89, 0xE5 });       // mov rbp, rsp
+		code.insert(code.end(), { 0x48, 0x83, 0xE4, 0xF0 }); // and rsp, -16
+		code.insert(code.end(), { 0x48, 0x83, 0xEC, 0x20 }); // sub rsp, 0x20 (shadow space)
 		code.insert(code.end(), { 0x48, 0x8B, 0x03 });       // mov rax, [rbx]
 		code.insert(code.end(), { 0x48, 0x8B, 0x4B, 0x08 }); // mov rcx, [rbx+8]
 		code.insert(code.end(), { 0x48, 0x8B, 0x53, 0x10 }); // mov rdx, [rbx+16]
 		code.insert(code.end(), { 0xFF, 0xD0 });             // call rax
 		code.insert(code.end(), { 0x48, 0x89, 0x43, 0x18 }); // mov [rbx+24], rax
+		code.insert(code.end(), { 0x48, 0x89, 0xEC });       // mov rsp, rbp
 		code.push_back(0xC3);                                // ret
 
 		Mem.ExecuteShellcode(code.data(), code.size());

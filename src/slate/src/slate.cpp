@@ -6224,8 +6224,19 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         NotifyManager::Send("Enable Experimental Natives first", 300.0f);
                     }
                     else {
-                        const std::string status = Core::Features::NativeCaller::Diagnostics();
-                        NotifyManager::Send(status.c_str(), 600.0f);
+                        std::string status = Core::Features::NativeCaller::Diagnostics();
+
+                        const uintptr_t test_handler = Core::Features::NativeCaller::GetNativeHandler(0x1C99BB7B6E96D16Full);
+                        status += " | handler=";
+                        status += (test_handler ? "1" : "0");
+
+                        if (auto* local_ped = Core::SDK::Pointers::pLocalPlayer) {
+                            const uint32_t local_handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local_ped));
+                            status += " | handle=";
+                            status += std::to_string(local_handle);
+                        }
+
+                        NotifyManager::Send(status.c_str(), 900.0f);
                     }
                 }
                 TextDisabled("Native: %s", Core::Features::NativeCaller::Diagnostics().c_str());
