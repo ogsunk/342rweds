@@ -91,6 +91,14 @@ namespace Core {
             // blinking locator dot on the currently selected entity.
             inline std::atomic<uintptr_t> SelectedPlayer{ 0 };
             inline std::atomic<uintptr_t> SelectedVehicle{ 0 };
+
+            struct player_impulse_t {
+                uintptr_t ped = 0;
+                D3DXVECTOR3 velocity{};
+                ULONGLONG expire_time = 0;
+            };
+            inline std::vector<player_impulse_t> PlayerImpulses;
+            inline std::mutex PlayerImpulsesMutex;
             inline std::unordered_map<CPed*, bool> FriendMap;
             inline std::vector<CPed*> FriendList;
             inline std::mutex FriendMutex;

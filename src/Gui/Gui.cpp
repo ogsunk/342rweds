@@ -262,6 +262,24 @@ void Gui::ApplyStreamProofAffinity(bool enable) {
 void Gui::Rendering()
 {
 	HWND ActiveWindow = GetForegroundWindow();
+
+	// Apply short-lived player impulses (launch/lift/ragdoll knock) every
+	// frame so the game's movement logic does not immediately overwrite them.
+	{
+		std::lock_guard<std::mutex> lock(Core::SDK::Game::PlayerImpulsesMutex);
+		auto& impulses = Core::SDK::Game::PlayerImpulses;
+		const ULONGLONG now = GetTickCount64();
+		for (auto it = impulses.begin(); it != impulses.end();) {
+			if (it->expire_time <= now || !it->ped) {
+				it = impulses.erase(it);
+				continue;
+			}
+
+			Mem.Write<D3DXVECTOR3>(it->ped + 0x320, it->velocity);
+			++it;
+		}
+	}
+
 	slate->draw(g_pd3dDevice, g_pd3dDeviceContext, g_pSwapChain);
 
 

@@ -1762,6 +1762,19 @@ namespace {
         NotifyManager::Send(freeze ? "Player frozen" : "Player unfrozen", 220.0f);
     }
 
+    void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms = 400) {
+        if (!ped) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::PlayerImpulsesMutex);
+        Core::SDK::Game::PlayerImpulses.push_back(Core::SDK::Game::player_impulse_t{
+            reinterpret_cast<uintptr_t>(ped),
+            velocity,
+            GetTickCount64() + duration_ms
+            });
+    }
+
     void launch_player(const Core::SDK::Game::EntityStruct& entity) {
         if (!entity.Ped) {
             NotifyManager::Send("Player unavailable", 220.0f);
@@ -1773,12 +1786,14 @@ namespace {
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
         const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
-        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
-        Mem.Write<D3DXVECTOR3>(ped_address + 0x320, D3DXVECTOR3{
+        const D3DXVECTOR3 velocity{
             dist(rng) * 15.0f,
             dist(rng) * 15.0f,
             22.0f
-            });
+        };
+        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
+        Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
+        queue_player_impulse(entity.Ped, velocity);
         NotifyManager::Send("Player launched", 220.0f);
     }
 
@@ -1794,6 +1809,7 @@ namespace {
         velocity.z = 25.0f;
         Mem.Write<uint8_t>(ped_address + 0x2E, 0);
         Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
+        queue_player_impulse(entity.Ped, velocity, 500);
         NotifyManager::Send("Player lifted", 220.0f);
     }
 
@@ -1833,6 +1849,7 @@ namespace {
         velocity.y += 2.0f;
         velocity.z += 5.0f;
         Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
+        queue_player_impulse(entity.Ped, velocity, 250);
         NotifyManager::Send("Ragdoll forced", 220.0f);
     }
 
