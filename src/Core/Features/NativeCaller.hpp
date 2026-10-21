@@ -201,11 +201,11 @@ namespace Core::Features::NativeCaller
 	inline std::string Diagnostics()
 	{
 		Initialize();
-		return std::string("rage=") + (g_rage_base ? "yes" : "no") +
-			" map=" + (g_map_pattern_found ? "yes" : "no") +
-			" p2h=" + (g_pointer_pattern_found ? "yes" : "no") +
-			" modbase=" + (Mem.ModBase ? "yes" : "no") +
-			" proc=" + (Mem.ProcHandle ? "yes" : "no");
+		return std::string("r=") + (g_rage_base ? "1" : "0") +
+			" m=" + (g_map_pattern_found ? "1" : "0") +
+			" p=" + (g_pointer_pattern_found ? "1" : "0") +
+			" b=" + (Mem.ModBase ? "1" : "0") +
+			" h=" + (Mem.ProcHandle ? "1" : "0");
 	}
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
