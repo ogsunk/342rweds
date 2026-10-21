@@ -121,8 +121,6 @@ namespace Core::Features::NativeCaller
 		if (g_initialized.load())
 			return g_available.load();
 
-		g_initialized.store(true);
-
 		g_rage_base = FindModuleBase("rage-scripting-five.dll");
 		if (!g_rage_base)
 		{
@@ -187,8 +185,12 @@ namespace Core::Features::NativeCaller
 			}
 		}
 
-		g_available.store(g_fast_path_map != 0 && g_pointer_to_handle != 0);
-		return g_available.load();
+		const bool available = g_fast_path_map != 0 && g_pointer_to_handle != 0;
+		g_available.store(available);
+		if (available)
+			g_initialized.store(true);
+
+		return available;
 	}
 
 	inline bool IsAvailable()
