@@ -509,6 +509,9 @@ namespace Core::Features::NativeCaller
 
 	inline std::string Diagnostics()
 	{
+		static std::atomic<int> diag_calls{ 0 };
+		diag_calls.fetch_add(1);
+
 		Initialize();
 		return std::string("r=") + (g_rage_base ? "1" : "0") +
 			" m=" + (g_map_pattern_found ? "1" : "0") +
@@ -519,6 +522,7 @@ namespace Core::Features::NativeCaller
 			" rs=" + (g_rage_size ? "1" : "0") +
 			" st=" + std::to_string(g_stage.load()) +
 			" a=" + std::to_string(g_init_attempts.load()) +
+			" dc=" + std::to_string(diag_calls.load()) +
 			" pid=" + std::to_string(Mem.ProcId) +
 			" build=" + std::to_string(CurrentBuild());
 	}
