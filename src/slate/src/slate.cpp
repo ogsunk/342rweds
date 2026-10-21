@@ -966,6 +966,7 @@ namespace {
         std::atomic<ULONGLONG> refresh_block_until{ 0 };
         auth::AccountProfile profile{};
         bool has_profile = false;
+        bool discord_identity_locked = false;
         std::string avatar_loaded_url;
         std::string avatar_attempted_url;
     };
@@ -1062,11 +1063,61 @@ namespace {
 
             {
                 std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
-                if (ok || local_discord_ok) {
+
+                // Keep the last successfully detected identity for the whole
+                // process lifetime. Background refreshes merge into it and can
+                // never replace known Discord data with empty API results.
+                if (ok || local_discord_ok || account_sidebar_state.has_profile) {
+                    auto& current = account_sidebar_state.profile;
+
+                    // Once the local Discord client has been read successfully,
+                    // freeze that identity for this process. Later account-API
+                    // refreshes may update subscription data but cannot change
+                    // the detected Discord name/avatar.
+                    if (account_sidebar_state.discord_identity_locked) {
+                        fetched_profile.discord_id = current.discord_id;
+                        fetched_profile.discord_username = current.discord_username;
+                        fetched_profile.discord_display_name = current.discord_display_name;
+                        fetched_profile.discord_avatar_hash = current.discord_avatar_hash;
+                        fetched_profile.discord_avatar_url = current.discord_avatar_url;
+                    }
+                    else if (local_discord_ok && !fetched_profile.discord_id.empty()) {
+                        account_sidebar_state.discord_identity_locked = true;
+                    }
+
+                    if (fetched_profile.discord_id.empty())
+                        fetched_profile.discord_id = current.discord_id;
+                    if (fetched_profile.discord_username.empty())
+                        fetched_profile.discord_username = current.discord_username;
+                    if (fetched_profile.discord_display_name.empty())
+                        fetched_profile.discord_display_name = current.discord_display_name;
+                    if (fetched_profile.discord_avatar_hash.empty())
+                        fetched_profile.discord_avatar_hash = current.discord_avatar_hash;
+                    if (fetched_profile.discord_avatar_url.empty())
+                        fetched_profile.discord_avatar_url = current.discord_avatar_url;
+                    if (fetched_profile.user_name.empty())
+                        fetched_profile.user_name = current.user_name;
+                    if (fetched_profile.ingame_name.empty())
+                        fetched_profile.ingame_name = current.ingame_name;
+                    if (fetched_profile.expiredate.empty())
+                        fetched_profile.expiredate = current.expiredate;
+                    if (fetched_profile.expires_at.empty())
+                        fetched_profile.expires_at = current.expires_at;
+
+                    // Access flags are additive and are never revoked by a
+                    // transient partial response.
+                    fetched_profile.admin = fetched_profile.admin || current.admin;
+                    fetched_profile.staff = fetched_profile.staff || current.staff;
+
                     account_sidebar_state.profile = std::move(fetched_profile);
-                    account_sidebar_state.has_profile = true;
+                    if (ok || local_discord_ok) {
+                        account_sidebar_state.has_profile = true;
+                    }
+
                     const std::string avatar_url = trim_copy(account_sidebar_state.profile.discord_avatar_url);
-                    if (avatar_url != account_sidebar_state.avatar_loaded_url) {
+                    if (!avatar_url.empty() &&
+                        avatar_url != account_sidebar_state.avatar_loaded_url &&
+                        avatar_url != account_sidebar_state.avatar_attempted_url) {
                         account_sidebar_state.avatar_attempted_url.clear();
                     }
                 }
