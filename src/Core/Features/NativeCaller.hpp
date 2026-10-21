@@ -131,6 +131,37 @@ namespace Core::Features::NativeCaller
 		return result;
 	}
 
+	inline bool FindModuleInfo(const char* module_name, uintptr_t& out_base, uintptr_t& out_size)
+	{
+		out_base = 0;
+		out_size = 0;
+
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, Mem.ProcId);
+		if (snapshot == INVALID_HANDLE_VALUE)
+			return false;
+
+		MODULEENTRY32 entry{};
+		entry.dwSize = sizeof(entry);
+
+		bool found = false;
+		if (Module32First(snapshot, &entry))
+		{
+			do
+			{
+				if (_stricmp(entry.szModule, module_name) == 0)
+				{
+					out_base = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
+					out_size = static_cast<uintptr_t>(entry.modBaseSize);
+					found = true;
+					break;
+				}
+			} while (Module32Next(snapshot, &entry));
+		}
+
+		CloseHandle(snapshot);
+		return found;
+	}
+
 	inline uintptr_t GetModuleSizeFromPE(uintptr_t module_base)
 	{
 		if (!module_base)
@@ -282,18 +313,12 @@ namespace Core::Features::NativeCaller
 		if (g_available.load())
 			return true;
 
-		g_rage_base = FindModuleBase("rage-scripting-five.dll");
-		if (!g_rage_base)
+		uintptr_t rage_size = 0;
+		if (!FindModuleInfo("rage-scripting-five.dll", g_rage_base, rage_size))
 		{
 			// Some builds keep the native map in the main module instead.
 			g_rage_base = Mem.ModBase;
-		}
-
-		uintptr_t rage_size = 0;
-		MODULEINFO module_info{};
-		if (GetModuleInformation(Mem.ProcHandle, reinterpret_cast<HMODULE>(g_rage_base), &module_info, sizeof(module_info)))
-		{
-			rage_size = module_info.SizeOfImage;
+			rage_size = Mem.ModBaseSize;
 		}
 
 		if (!rage_size)
