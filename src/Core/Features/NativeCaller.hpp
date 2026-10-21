@@ -348,6 +348,7 @@ namespace Core::Features::NativeCaller
 		// known per-build RVA, then fall back to patterns.
 		switch (g_Offsets.CurrentBuild)
 		{
+		case 3258: g_pointer_to_handle = Mem.ModBase + 0x1639CE8; break;
 		case 3095: g_pointer_to_handle = Mem.ModBase + 0x1624F80; break;
 		case 2944: g_pointer_to_handle = Mem.ModBase + 0x160FF90; break;
 		case 2802: g_pointer_to_handle = Mem.ModBase + 0x15EA290; break;
