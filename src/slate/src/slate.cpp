@@ -6228,6 +6228,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         NotifyManager::Send(status.c_str(), 600.0f);
                     }
                 }
+                TextDisabled("Native: %s", Core::Features::NativeCaller::Diagnostics().c_str());
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
                 //    std::thread([&] { NvidiaProofing::Execute(g_Config.General->NVStreamProof);}).detach();
                 //}
