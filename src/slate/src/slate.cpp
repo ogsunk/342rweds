@@ -6231,9 +6231,10 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                             reinterpret_cast<uintptr_t>(Core::SDK::Pointers::pLocalPlayer));
                         const uintptr_t handler = Core::Features::NativeCaller::GetNativeHandler(0xAE99FB955581844Aull);
                         const std::string status =
-                            std::string("Native ready | handle=") + (handle ? "yes" : "no") +
+                            Core::Features::NativeCaller::Diagnostics() +
+                            " | handle=" + (handle ? "yes" : "no") +
                             " | handler=" + (handler ? "yes" : "no");
-                        NotifyManager::Send(status.c_str(), 400.0f);
+                        NotifyManager::Send(status.c_str(), 600.0f);
                     }
                 }
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {

@@ -7,9 +7,33 @@ namespace Core::Features::NativeCaller
 {
 	inline uintptr_t g_pointer_to_handle = 0;
 	inline uintptr_t g_fast_path_map = 0;
+	inline uintptr_t g_rage_base = 0;
+	inline bool g_map_pattern_found = false;
+	inline bool g_pointer_pattern_found = false;
 	inline std::atomic<bool> g_initialized{ false };
 	inline std::atomic<bool> g_available{ false };
 	inline std::mutex g_init_mutex;
+
+	inline uintptr_t FindModuleBase(const char* module_name)
+	{
+		HMODULE modules[1024]{};
+		DWORD needed = 0;
+		if (!EnumProcessModules(Mem.ProcHandle, modules, sizeof(modules), &needed))
+			return 0;
+
+		const size_t count = needed / sizeof(HMODULE);
+		for (size_t i = 0; i < count; ++i)
+		{
+			char name[MAX_PATH]{};
+			if (GetModuleBaseNameA(Mem.ProcHandle, modules[i], name, sizeof(name)) &&
+				_stricmp(name, module_name) == 0)
+			{
+				return reinterpret_cast<uintptr_t>(modules[i]);
+			}
+		}
+
+		return 0;
+	}
 
 	inline uint64_t FloatBits(float value)
 	{
@@ -99,28 +123,59 @@ namespace Core::Features::NativeCaller
 
 		g_initialized.store(true);
 
-		uintptr_t rage_size = 0;
-		const uintptr_t rage_base = Mem.GetModuleBaseAddr(Mem.ProcId, "rage-scripting-five.dll", &rage_size);
-		if (!rage_base)
+		g_rage_base = FindModuleBase("rage-scripting-five.dll");
+		if (!g_rage_base)
 		{
 			g_available.store(false);
 			return false;
 		}
 
-		const uintptr_t map_lea = Mem.FindSignatureStr(
-			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ? 4C 8B 4C 24",
-			rage_base,
-			rage_size);
-		if (map_lea)
+		uintptr_t rage_size = 0;
+		MODULEINFO module_info{};
+		if (GetModuleInformation(Mem.ProcHandle, reinterpret_cast<HMODULE>(g_rage_base), &module_info, sizeof(module_info)))
 		{
-			const int32_t displacement = Mem.Read<int32_t>(map_lea + 3);
-			g_fast_path_map = map_lea + 7 + displacement;
+			rage_size = module_info.SizeOfImage;
 		}
 
-		g_pointer_to_handle = Mem.FindSignatureStr(
+		if (!rage_size)
+		{
+			g_available.store(false);
+			return false;
+		}
+
+		const char* map_patterns[] = {
+			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ? 4C 8B 4C 24",
+			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08 48 89 59 ?",
+			"48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8B 08"
+		};
+
+		for (const char* pattern : map_patterns)
+		{
+			const uintptr_t map_lea = Mem.FindSignatureStr(pattern, g_rage_base, rage_size);
+			if (!map_lea)
+				continue;
+
+			const int32_t displacement = Mem.Read<int32_t>(map_lea + 3);
+			g_fast_path_map = map_lea + 7 + displacement;
+			g_map_pattern_found = g_fast_path_map != 0;
+			break;
+		}
+
+		const char* pointer_patterns[] = {
 			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
-			Mem.ModBase,
-			Mem.ModBaseSize);
+			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15",
+			"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20"
+		};
+
+		for (const char* pattern : pointer_patterns)
+		{
+			g_pointer_to_handle = Mem.FindSignatureStr(pattern, Mem.ModBase, Mem.ModBaseSize);
+			if (g_pointer_to_handle)
+			{
+				g_pointer_pattern_found = true;
+				break;
+			}
+		}
 
 		g_available.store(g_fast_path_map != 0 && g_pointer_to_handle != 0);
 		return g_available.load();
@@ -129,6 +184,14 @@ namespace Core::Features::NativeCaller
 	inline bool IsAvailable()
 	{
 		return Initialize();
+	}
+
+	inline std::string Diagnostics()
+	{
+		Initialize();
+		return std::string("rage=") + (g_rage_base ? "yes" : "no") +
+			" map=" + (g_map_pattern_found ? "yes" : "no") +
+			" p2h=" + (g_pointer_pattern_found ? "yes" : "no");
 	}
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
