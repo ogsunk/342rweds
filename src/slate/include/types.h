@@ -331,6 +331,30 @@ public:
 		h = image_load_info.Height;
 	}
 
+	// Creates the replacement texture first and only releases the previous
+	// texture on success. This prevents a failed avatar refresh from blanking
+	// an already-loaded profile picture.
+	bool try_load( ID3D11Device* device, void* data, size_t data_size ) {
+		if ( !device || !data || data_size == 0 ) {
+			return false;
+		}
+
+		ID3D11ShaderResourceView* replacement = nullptr;
+		D3DX11_IMAGE_LOAD_INFO image_load_info{};
+		const HRESULT hr = D3DX11CreateShaderResourceViewFromMemory(
+			device, data, data_size, &image_load_info, nullptr, &replacement, nullptr );
+
+		if ( FAILED( hr ) || replacement == nullptr ) {
+			return false;
+		}
+
+		reset();
+		image = replacement;
+		w = image_load_info.Width;
+		h = image_load_info.Height;
+		return true;
+	}
+
 	void load( ID3D11Device* device, const std::string_view& url ) {
 		if ( image != nullptr )
 			return;

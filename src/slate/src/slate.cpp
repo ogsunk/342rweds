@@ -969,6 +969,10 @@ namespace {
         bool discord_identity_locked = false;
         std::string avatar_loaded_url;
         std::string avatar_attempted_url;
+        std::string avatar_pending_url;
+        std::vector<unsigned char> avatar_pending_bytes;
+        bool avatar_fetch_in_flight = false;
+        ULONGLONG avatar_retry_after = 0;
     };
 
     account_sidebar_state_t account_sidebar_state;
@@ -1030,7 +1034,25 @@ namespace {
             const bool ok = auth::LoadCurrentAccountProfile(fetched_profile, &raw);
             std::string discord_raw;
             auth::discord_ipc_identity discord_identity{};
-            const bool local_discord_ok = auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw);
+            bool local_discord_ok = false;
+
+            bool identity_already_locked = false;
+            {
+                std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
+                identity_already_locked = account_sidebar_state.discord_identity_locked;
+            }
+
+            // Retry the local Discord pipe a few times. Discord may still be
+            // starting when the overlay launches, so a single failed connect
+            // must not permanently stick the widget to fallback values.
+            if (!identity_already_locked) {
+                for (int attempt = 0; attempt < 4 && !local_discord_ok; ++attempt) {
+                    local_discord_ok = auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw);
+                    if (!local_discord_ok && attempt < 3) {
+                        Sleep(500);
+                    }
+                }
+            }
 
             // IPC must remain independent from the account request. A
             // transient account/API failure must not erase Discord identity.
@@ -1157,65 +1179,170 @@ namespace {
         }).detach();
     }
 
-    void pump_account_sidebar_avatar(c_slate* instance, ID3D11Device* device) {
-        std::string avatar_url;
-        bool has_profile = false;
-        bool had_loaded_avatar = false;
-        {
-            std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
-            has_profile = account_sidebar_state.has_profile;
-            avatar_url = trim_copy(account_sidebar_state.profile.discord_avatar_url);
-            had_loaded_avatar = !account_sidebar_state.avatar_loaded_url.empty();
-
-            if (!has_profile) {
-                if (had_loaded_avatar) {
-                    account_sidebar_state.avatar_loaded_url.clear();
-                    account_sidebar_state.avatar_attempted_url.clear();
-                }
-                else {
-                    return;
-                }
-            }
-
-            if (avatar_url.empty()) {
-                if (had_loaded_avatar) {
-                    account_sidebar_state.avatar_loaded_url.clear();
-                    account_sidebar_state.avatar_attempted_url.clear();
-                }
-                else {
-                    return;
-                }
-            }
-
-            if (avatar_url.empty() ||
-                account_sidebar_state.avatar_loaded_url == avatar_url ||
-                account_sidebar_state.avatar_attempted_url == avatar_url) {
-                if (!avatar_url.empty()) {
-                    return;
-                }
-            }
-
-            account_sidebar_state.avatar_attempted_url = avatar_url;
+    bool download_avatar_image(const std::string& url, std::vector<unsigned char>& out) {
+        out.clear();
+        if (url.empty()) {
+            return false;
         }
 
-        if (avatar_url.empty()) {
-            instance->avatar.reset();
+        HINTERNET internet = InternetOpenA(
+            "SunketsWare/1.0",
+            INTERNET_OPEN_TYPE_PRECONFIG,
+            nullptr,
+            nullptr,
+            0);
+        if (!internet) {
+            return false;
+        }
+
+        const DWORD flags =
+            INTERNET_FLAG_RELOAD |
+            INTERNET_FLAG_NO_CACHE_WRITE |
+            (url.rfind("https://", 0) == 0 ? INTERNET_FLAG_SECURE : 0);
+
+        HINTERNET request = InternetOpenUrlA(
+            internet,
+            url.c_str(),
+            "Accept: image/avif,image/webp,image/apng,image/png,image/jpeg,image/*;q=0.8\r\n",
+            -1,
+            flags,
+            0);
+        if (!request) {
+            InternetCloseHandle(internet);
+            return false;
+        }
+
+        DWORD status = 0;
+        DWORD status_size = sizeof(status);
+        const bool status_ok = HttpQueryInfoA(
+            request,
+            HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
+            &status,
+            &status_size,
+            nullptr) != FALSE;
+
+        if (status_ok && status != 200) {
+            InternetCloseHandle(request);
+            InternetCloseHandle(internet);
+            return false;
+        }
+
+        out.reserve(32 * 1024);
+        unsigned char buffer[8192];
+        DWORD read = 0;
+        while (InternetReadFile(request, buffer, sizeof(buffer), &read) && read > 0) {
+            out.insert(out.end(), buffer, buffer + read);
+            if (out.size() > (4u * 1024u * 1024u)) {
+                out.clear();
+                break;
+            }
+        }
+
+        InternetCloseHandle(request);
+        InternetCloseHandle(internet);
+        if (out.empty()) {
+            return false;
+        }
+
+        // Validate the PNG/JPEG/WebP magic before handing bytes to D3DX.
+        const bool png = out.size() >= 8 &&
+            out[0] == 0x89 && out[1] == 0x50 && out[2] == 0x4E && out[3] == 0x47;
+        const bool jpeg = out.size() >= 2 && out[0] == 0xFF && out[1] == 0xD8;
+        const bool webp = out.size() >= 12 &&
+            out[0] == 'R' && out[1] == 'I' && out[2] == 'F' && out[3] == 'F' &&
+            out[8] == 'W' && out[9] == 'E' && out[10] == 'B' && out[11] == 'P';
+        const bool bmp = out.size() >= 2 && out[0] == 'B' && out[1] == 'M';
+
+        if (!png && !jpeg && !webp && !bmp) {
+            out.clear();
+            return false;
+        }
+
+        return true;
+    }
+
+    void pump_account_sidebar_avatar(c_slate* instance, ID3D11Device* device) {
+        std::string avatar_url;
+        std::vector<unsigned char> image_bytes;
+        bool ready_to_upload = false;
+
+        {
+            std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
+
+            if (!account_sidebar_state.has_profile) {
+                return;
+            }
+
+            avatar_url = trim_copy(account_sidebar_state.profile.discord_avatar_url);
+            if (avatar_url.empty()) {
+                return;
+            }
+
+            if (account_sidebar_state.avatar_loaded_url == avatar_url) {
+                return;
+            }
+
+            if (account_sidebar_state.avatar_pending_url == avatar_url &&
+                !account_sidebar_state.avatar_pending_bytes.empty()) {
+                image_bytes.swap(account_sidebar_state.avatar_pending_bytes);
+                account_sidebar_state.avatar_pending_url.clear();
+                ready_to_upload = true;
+            }
+            else {
+                if (!account_sidebar_state.avatar_pending_url.empty() &&
+                    account_sidebar_state.avatar_pending_url != avatar_url) {
+                    account_sidebar_state.avatar_pending_url.clear();
+                    account_sidebar_state.avatar_pending_bytes.clear();
+                }
+
+                const ULONGLONG now = GetTickCount64();
+                const bool retry_allowed = now >= account_sidebar_state.avatar_retry_after;
+
+                if (!ready_to_upload &&
+                    !account_sidebar_state.avatar_fetch_in_flight &&
+                    retry_allowed) {
+                    account_sidebar_state.avatar_attempted_url = avatar_url;
+                    account_sidebar_state.avatar_fetch_in_flight = true;
+
+                    std::thread([avatar_url] {
+                        std::vector<unsigned char> downloaded;
+                        bool ok = false;
+
+                        for (int attempt = 0; attempt < 3 && !ok; ++attempt) {
+                            ok = download_avatar_image(avatar_url, downloaded);
+                            if (!ok && attempt < 2) {
+                                Sleep(600);
+                            }
+                        }
+
+                        std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
+                        if (ok && !downloaded.empty()) {
+                            account_sidebar_state.avatar_pending_url = avatar_url;
+                            account_sidebar_state.avatar_pending_bytes = std::move(downloaded);
+                            account_sidebar_state.avatar_retry_after = 0;
+                        }
+                        else {
+                            account_sidebar_state.avatar_retry_after = GetTickCount64() + 30000;
+                        }
+                        account_sidebar_state.avatar_fetch_in_flight = false;
+                    }).detach();
+                }
+            }
+        }
+
+        if (!ready_to_upload || image_bytes.empty()) {
             return;
         }
 
-        instance->avatar.reset();
-        try {
-            instance->avatar.load(device, avatar_url);
-            const bool loaded = static_cast<bool>(static_cast<ImTextureID>(instance->avatar));
+        if (instance->avatar.try_load(device, image_bytes.data(), image_bytes.size())) {
             std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
-            if (loaded) {
-                account_sidebar_state.avatar_loaded_url = avatar_url;
-            }
-            else {
-                account_sidebar_state.avatar_attempted_url.clear();
-            }
+            account_sidebar_state.avatar_loaded_url = avatar_url;
+            account_sidebar_state.avatar_attempted_url = avatar_url;
+            account_sidebar_state.avatar_retry_after = 0;
         }
-        catch (...) {
+        else {
+            std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
+            account_sidebar_state.avatar_retry_after = GetTickCount64() + 30000;
         }
     }
 
@@ -1232,14 +1359,21 @@ namespace {
 
         const std::string preferred_name = !profile.discord_display_name.empty() ? profile.discord_display_name : profile.user_name;
         const std::string validated_name = has_profile ? Utils::ValidateTextForRendering(preferred_name) : std::string{};
-        const std::string display_name = make_safe_ui_label(validated_name.empty() ? "Discord" : validated_name, "Discord");
-        const std::string username = make_safe_ui_label(
-            Utils::ValidateTextForRendering(profile.discord_username).empty()
-                ? profile.user_name
-                : profile.discord_username,
-            "unknown"
+        const std::string display_name = make_safe_ui_label(
+            validated_name.empty() ? (has_profile ? "SunketsWare" : "Loading Discord...") : validated_name,
+            "SunketsWare"
         );
-        const std::string until_text = format_account_until_text(profile);
+
+        const std::string username_source =
+            Utils::ValidateTextForRendering(profile.discord_username).empty()
+                ? Utils::ValidateTextForRendering(profile.user_name)
+                : Utils::ValidateTextForRendering(profile.discord_username);
+
+        const std::string username_line = !username_source.empty()
+            ? ("@" + make_safe_ui_label(username_source, ""))
+            : (has_profile ? std::string{} : std::string{ "connecting..." });
+
+        const std::string until_text = has_profile ? format_account_until_text(profile) : std::string{};
 
         const ImVec2 card_pos = GetWindowPos() + ImVec2{ 14 ds, GetWindowHeight() - 58 ds };
         const ImVec2 card_size = { GetWindowWidth() - 28 ds, 44 ds };
@@ -1272,10 +1406,13 @@ namespace {
         }
 
         const std::string clipped_name = display_name.substr(0, 48);
-        const std::string clipped_username = username.substr(0, 48);
         draw->AddText(name_font, 14 ds, { text_x, card_pos.y + 5 ds }, g_style->col(pcol_text), clipped_name.c_str(), nullptr, text_width);
-        draw->AddText(meta_font, 12 ds, { text_x, card_pos.y + 20 ds }, g_style->col(pcol_text2), ("@" + clipped_username).c_str(), nullptr, text_width);
-        draw->AddText(meta_font, 11 ds, { text_x, card_pos.y + 32 ds }, g_style->col(pcol_text3), until_text.c_str(), nullptr, text_width);
+        if (!username_line.empty()) {
+            draw->AddText(meta_font, 12 ds, { text_x, card_pos.y + 20 ds }, g_style->col(pcol_text2), username_line.c_str(), nullptr, text_width);
+        }
+        if (!until_text.empty()) {
+            draw->AddText(meta_font, 11 ds, { text_x, card_pos.y + 32 ds }, g_style->col(pcol_text3), until_text.c_str(), nullptr, text_width);
+        }
     }
 
     bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
@@ -4283,6 +4420,10 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
     initialize_fonts();
     load_menu_logo_texture(device, get_active_menu_season());
+
+    // Begin Discord/account detection during startup rather than waiting for
+    // the menu to be opened. The worker retries the Discord pipe internally.
+    request_account_sidebar_refresh(true);
 
     // load_menu_logo_texture(device, menu_season_t::Spring);
     // load_menu_logo_texture(device, menu_season_t::Summer);
