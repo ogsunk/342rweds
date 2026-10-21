@@ -131,6 +131,22 @@ namespace Core::Features::NativeCaller
 		return result;
 	}
 
+	inline uintptr_t GetModuleSizeFromPE(uintptr_t module_base)
+	{
+		if (!module_base)
+			return 0;
+
+		const uint32_t e_lfanew = Mem.Read<uint32_t>(module_base + 0x3C);
+		if (!e_lfanew)
+			return 0;
+
+		const uintptr_t nt = module_base + e_lfanew;
+		if (Mem.Read<uint32_t>(nt) != 0x00004550) // 'PE\0\0'
+			return 0;
+
+		return Mem.Read<uint32_t>(nt + 0x18 + 0x38); // OptionalHeader.SizeOfImage
+	}
+
 	inline uintptr_t FindPatternInRange(const char* pattern, uintptr_t base, size_t size)
 	{
 		if (!pattern || !base || !size)
@@ -278,6 +294,11 @@ namespace Core::Features::NativeCaller
 		if (GetModuleInformation(Mem.ProcHandle, reinterpret_cast<HMODULE>(g_rage_base), &module_info, sizeof(module_info)))
 		{
 			rage_size = module_info.SizeOfImage;
+		}
+
+		if (!rage_size)
+		{
+			rage_size = GetModuleSizeFromPE(g_rage_base);
 		}
 
 		if (!rage_size && g_rage_base == Mem.ModBase)
