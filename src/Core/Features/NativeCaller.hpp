@@ -9,6 +9,7 @@ namespace Core::Features::NativeCaller
 	inline uintptr_t g_get_native_handler = 0;
 	inline uintptr_t g_fast_path_map = 0;
 	inline uintptr_t g_rage_base = 0;
+	inline uintptr_t g_rage_size = 0;
 	inline bool g_map_pattern_found = false;
 	inline bool g_pointer_pattern_found = false;
 	inline std::atomic<bool> g_initialized{ false };
@@ -217,6 +218,8 @@ namespace Core::Features::NativeCaller
 			return false;
 		}
 
+		g_rage_size = rage_size;
+
 		// FiveM exports scrEngine::GetNativeHandler from rage-scripting-five.dll.
 		// Resolving the export is far more reliable than pattern-scanning the map.
 		g_get_native_handler = ResolveExport(g_rage_base, "GetNativeHandler");
@@ -249,7 +252,20 @@ namespace Core::Features::NativeCaller
 			{
 				g_pointer_to_handle = long_pattern;
 			}
-			else
+			else if (g_rage_base && g_rage_base != Mem.ModBase)
+			{
+				const uintptr_t long_pattern_rage = Mem.FindSignatureStr(
+					"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
+					g_rage_base,
+					g_rage_size);
+
+				if (long_pattern_rage)
+				{
+					g_pointer_to_handle = long_pattern_rage;
+				}
+			}
+
+			if (!g_pointer_to_handle)
 			{
 				const uintptr_t short_pattern = Mem.FindSignatureStr(
 					"48 8B F9 48 83 C1 10 33 DB",
@@ -259,6 +275,18 @@ namespace Core::Features::NativeCaller
 				if (short_pattern)
 				{
 					g_pointer_to_handle = short_pattern - 0x15;
+				}
+				else if (g_rage_base && g_rage_base != Mem.ModBase)
+				{
+					const uintptr_t short_pattern_rage = Mem.FindSignatureStr(
+						"48 8B F9 48 83 C1 10 33 DB",
+						g_rage_base,
+						g_rage_size);
+
+					if (short_pattern_rage)
+					{
+						g_pointer_to_handle = short_pattern_rage - 0x15;
+					}
 				}
 			}
 		}
@@ -283,6 +311,8 @@ namespace Core::Features::NativeCaller
 			" p=" + (g_pointer_pattern_found ? "1" : "0") +
 			" b=" + (Mem.ModBase ? "1" : "0") +
 			" h=" + (Mem.ProcHandle ? "1" : "0") +
+			" s=" + (Mem.ModBaseSize ? "1" : "0") +
+			" rs=" + (g_rage_size ? "1" : "0") +
 			" build=" + std::to_string(g_Offsets.CurrentBuild);
 	}
 
