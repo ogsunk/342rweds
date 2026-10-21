@@ -2447,29 +2447,32 @@ namespace {
         float y;
     };
 
+    // Coordinates are normalized against the embedded 199x394 SunketsWare
+    // silhouette. They were measured from the actual non-transparent body
+    // pixels so the selector dots land on the rendered model.
     constexpr ped_hitbox_point_t aimbot_hitbox_points[] = {
-        { "Head", 0, 0.535f, 0.095f },
-        { "Neck", 1, 0.535f, 0.205f },
-        { "Chest", 2, 0.535f, 0.355f },
-        { "Arms", 3, 0.105f, 0.47f },
-        { "Arms", 3, 0.885f, 0.49f },
-        { "Legs", 4, 0.365f, 0.645f },
-        { "Legs", 4, 0.685f, 0.655f },
-        { "Feet", 5, 0.355f, 0.955f },
-        { "Feet", 5, 0.645f, 0.965f },
+        { "Head", 0, 0.482f, 0.081f },
+        { "Neck", 1, 0.482f, 0.152f },
+        { "Chest", 2, 0.482f, 0.305f },
+        { "Arms", 3, 0.116f, 0.470f },
+        { "Arms", 3, 0.859f, 0.470f },
+        { "Legs", 4, 0.372f, 0.673f },
+        { "Legs", 4, 0.608f, 0.673f },
+        { "Feet", 5, 0.332f, 0.926f },
+        { "Feet", 5, 0.646f, 0.926f },
     };
 
     constexpr ped_hitbox_point_t silentaim_hitbox_points[] = {
-        { "Head", 0, 0.535f, 0.095f },
-        { "Neck", 1, 0.535f, 0.205f },
-        { "Chest", 2, 0.535f, 0.355f },
-        { "Arms", 3, 0.105f, 0.47f },
-        { "Arms", 3, 0.885f, 0.49f },
-        { "Legs", 4, 0.365f, 0.645f },
-        { "Legs", 4, 0.685f, 0.655f },
-        { "Feet", 5, 0.355f, 0.955f },
-        { "Feet", 5, 0.645f, 0.965f },
-        { "Wheels", 6, 0.535f, 1.03f },
+        { "Head", 0, 0.482f, 0.081f },
+        { "Neck", 1, 0.482f, 0.152f },
+        { "Chest", 2, 0.482f, 0.305f },
+        { "Arms", 3, 0.116f, 0.470f },
+        { "Arms", 3, 0.859f, 0.470f },
+        { "Legs", 4, 0.372f, 0.673f },
+        { "Legs", 4, 0.608f, 0.673f },
+        { "Feet", 5, 0.332f, 0.926f },
+        { "Feet", 5, 0.646f, 0.926f },
+        { "Wheels", 6, 0.482f, 0.990f },
     };
 
     c_image ped_hitbox_photo;
@@ -2611,6 +2614,20 @@ namespace {
                 0.0f,
                 64,
                 2.0f);
+
+            // Show the actual selected aim point relative to the FOV center.
+            for (int i = 0; i < point_count; ++i) {
+                if (!values[points[i].value_index]) {
+                    continue;
+                }
+
+                const ImVec2 target{
+                    ped_rect.Min.x + ped_rect.GetWidth() * points[i].x,
+                    ped_rect.Min.y + ped_rect.GetHeight() * points[i].y
+                };
+                draw->AddLine(center, target, GetColorU32(color), 1.5f);
+                break;
+            }
         }
 
         bool hovered_points[12]{ };
@@ -4839,6 +4856,12 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             g_Config.ESP->SkeletonOutlineCol.Value.z,
             g_Config.ESP->SkeletonOutlineCol.Value.w
         };
+        float esp_head_circle_color[4] = {
+            g_Config.ESP->HeadCircleCol.Value.x,
+            g_Config.ESP->HeadCircleCol.Value.y,
+            g_Config.ESP->HeadCircleCol.Value.z,
+            g_Config.ESP->HeadCircleCol.Value.w
+        };
         float esp_health_gradient_start[4] = {
             g_Config.ESP->HealthBarGradientStart.Value.x,
             g_Config.ESP->HealthBarGradientStart.Value.y,
@@ -4893,16 +4916,24 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 }
                 widgets->checkbox(I_USER__OFF, "Ignore Self", &g_Config.ESP->IgnoreSelf);
                 widgets->checkbox(I_USER, "Player Names", &g_Config.ESP->UserNames);
+                if (g_Config.ESP->UserNames) {
+                    widgets->selector("Name Position", &g_Config.ESP->UserNamesState, { "Top", "Center", "Bottom" });
+                }
                 widgets->checkbox(I_SWORD, "Weapon Names", &g_Config.ESP->WeaponName);
                 if (g_Config.ESP->WeaponName) {
                     widgets->checkbox(I_SWORD, "Ignore Unarmed", &g_Config.ESP->IgnoreUnarmed);
+                    widgets->selector("Weapon Position", &g_Config.ESP->WeaponNameState, { "Top", "Center", "Bottom" });
                 }
                 widgets->checkbox(I_VECTOR__SPLINE, "Distance", &g_Config.ESP->DistanceFromMe);
+                if (g_Config.ESP->DistanceFromMe) {
+                    widgets->selector("Distance Position", &g_Config.ESP->DistanceFromMeState, { "Top", "Center", "Bottom" });
+                }
                 widgets->checkbox(I_BONE, "Skeleton", &g_Config.ESP->Skeleton);
                 if (g_Config.ESP->Skeleton) {
                     widgets->checkbox(I_EYE, "Skeleton Visibility Color", &g_Config.ESP->SkeletonVisibilityColor);
                     widgets->checkbox(I_BONE, "Skeleton Outline", &g_Config.ESP->SkeletonOutline);
                 }
+                widgets->checkbox(I_BONE, "Head Marker", &g_Config.ESP->HeadCircle);
                 widgets->checkbox(I_BONE, "Targets", &g_Config.ESP->Targets);
                 widgets->checkbox(I_BONE, "Show Passive", &g_Config.ESP->ShowPassive);
                 widgets->checkbox(I_BOX__ALIGN__TOP, "Box", &g_Config.ESP->Box);
@@ -4912,13 +4943,14 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_HEART, "Health Bar", &g_Config.ESP->HealthBar);
                 if (g_Config.ESP->HealthBar) {
                     widgets->checkbox(I_GRADIENTER, "Health Gradient", &g_Config.ESP->HealthBarGradient);
+                    widgets->selector("Health Position", &g_Config.ESP->HealthBarState, { "Top", "Right", "Bottom", "Left" });
                 }
                 widgets->checkbox(I_SHIELD, "Armor Bar", &g_Config.ESP->ArmorBar);
                 if (g_Config.ESP->ArmorBar) {
                     widgets->checkbox(I_GRADIENTER, "Armor Gradient", &g_Config.ESP->ArmorBarGradient);
+                    widgets->selector("Armor Position", &g_Config.ESP->ArmorBarState, { "Top", "Right", "Bottom", "Left" });
                 }
-                widgets->checkbox(I_USER__COG, "Ignore NPCs", &g_Config.ESP->IgnoreNPCs);
-                widgets->checkbox(I_MOOD__SILENCE, "Ignore Death", &g_Config.ESP->IgnoreDead);
+                widgets->checkbox(I_EYE__COG, "Snaplines", &g_Config.ESP->SnapLines);
             }
             widgets->child.end();
         }
@@ -4930,9 +4962,13 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             widgets->child.begin(I_PALETTE, "Visual Colors", 2, { 0, 348 ds });
             {
                 widgets->sliderint(I_GRADIENTER, "Max Distance", &g_Config.ESP->MaxDistance, 0, 1000, "%dm");
+                widgets->sliderfloat(I_BOX__ALIGN__TOP, "Box Thickness", &g_Config.ESP->BoxThickness, 0.5f, 5.0f, "%.1fpx");
                 widgets->sliderfloat(I_BONE, "Skeleton Thickness", &g_Config.ESP->SkeletonThickness, 0.5f, 5.0f, "%.1fpx");
+                widgets->sliderfloat(I_BONE, "Skeleton Outline Thickness", &g_Config.ESP->SkeletonOutlineThickness, 0.5f, 5.0f, "%.1fpx");
+                widgets->sliderfloat(I_VECTOR__SPLINE, "SnapLine Thickness", &g_Config.ESP->SnapLineThickness, 0.5f, 5.0f, "%.1fpx");
                 widgets->sliderfloat(I_TEXT__SIZE, "Text Size", &g_Config.ESP->TextSize, 0.50f, 2.5f, "%.2fx");
                 widgets->sliderfloat(I_RULER__MEASURE, "Text / Meter", &g_Config.ESP->TextDistanceMultiplier, 0.0f, 0.005f, "%.4fx/m");
+                widgets->sliderfloat(I_RULER__MEASURE, "Text Thickness", &g_Config.ESP->TextThickness, 0.0f, 1.0f, "%.0fpx");
                 widgets->coloredit(I_BONE, "Skeleton Color", esp_skeleton_color);
                 widgets->coloredit(I_EYE, "Friend Color", esp_friend_color);
                 widgets->coloredit(I_EYE, "True Invisible Color", esp_trueinvisible_color);
@@ -4944,6 +4980,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->coloredit(I_BOX__ALIGN__TOP, "Box Color", esp_box_color);
                 widgets->coloredit(I_BOX__ALIGN__TOP, "Box Fill Color", esp_filled_box_color);
                 widgets->coloredit(I_VECTOR__SPLINE, "SnapLines Color", esp_snapline_color);
+                if (g_Config.ESP->HeadCircle) {
+                    widgets->coloredit(I_BONE, "Head Circle Color", esp_head_circle_color);
+                }
                 if (g_Config.ESP->SkeletonOutline) {
                     widgets->coloredit(I_BONE, "Skeleton Outline Color", esp_skeleton_outline_color);
                 }
@@ -5016,6 +5055,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         g_Config.ESP->SkeletonOutlineCol.Value.y = esp_skeleton_outline_color[1];
         g_Config.ESP->SkeletonOutlineCol.Value.z = esp_skeleton_outline_color[2];
         g_Config.ESP->SkeletonOutlineCol.Value.w = esp_skeleton_outline_color[3];
+
+        g_Config.ESP->HeadCircleCol.Value.x = esp_head_circle_color[0];
+        g_Config.ESP->HeadCircleCol.Value.y = esp_head_circle_color[1];
+        g_Config.ESP->HeadCircleCol.Value.z = esp_head_circle_color[2];
+        g_Config.ESP->HeadCircleCol.Value.w = esp_head_circle_color[3];
 
         g_Config.ESP->HealthBarGradientStart.Value.x = esp_health_gradient_start[0];
         g_Config.ESP->HealthBarGradientStart.Value.y = esp_health_gradient_start[1];

@@ -287,6 +287,7 @@ namespace Core {
 			inline static ImVec2 UserNamesPos;
 			inline static int UserNamesState = 0;
 			inline static bool HeadCircle;
+			inline static ImColor HeadCircleCol{ 255, 255, 255, 200 };
 			inline static bool IgnoreNPCs;
 			inline static bool Observers;
 			inline static bool ShowLocalPlayer;
@@ -782,6 +783,7 @@ namespace Core {
 			ESPCfg["UserNamesPos"] = ImVec2ToJson(ESP->UserNamesPos);
 			ESPCfg["UserNamesState"] = ESP->UserNamesState;
 			ESPCfg["HeadCircle"] = ESP->HeadCircle;
+			ESPCfg["HeadCircleCol"] = ImColToJson(ESP->HeadCircleCol);
 			ESPCfg["IgnoreNPCs"] = ESP->IgnoreNPCs;
 			ESPCfg["Observers"] = ESP->Observers;
 			ESPCfg["ShowLocalPlayer"] = ESP->ShowLocalPlayer;
@@ -1152,6 +1154,7 @@ namespace Core {
 				ESP->UserNamesPos = JsonToImVec2(ESPCfg.value("UserNamesPos", ImVec2ToJson(ESP->UserNamesPos)));
 				ESP->UserNamesState = ESPCfg.value("UserNamesState", ESP->UserNamesState);
 				ESP->HeadCircle = ESPCfg.value("HeadCircle", ESP->HeadCircle);
+				ESP->HeadCircleCol = JsonToImCol(ESPCfg.value("HeadCircleCol", ImColToJson(ESP->HeadCircleCol)));
 				ESP->IgnoreNPCs = ESPCfg.value("IgnoreNPCs", ESP->IgnoreNPCs);
 				ESP->Observers = ESPCfg.value("Observers", ESP->Observers);
 				ESP->ShowLocalPlayer = ESPCfg.value("ShowLocalPlayer", ESP->ShowLocalPlayer);

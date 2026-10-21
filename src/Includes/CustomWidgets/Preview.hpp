@@ -125,22 +125,22 @@ namespace Custom
 					return ImVec2( iBox_X + iBox_Width * nx, iBox_Y + iBox_Height * ny );
 				};
 
-				// SunketsWare-compatible skeleton coordinates (from Preview.hpp)
-				ImVec2 Head = SkelPt( 0.50f, 0.105f );
-				ImVec2 Neck = SkelPt( 0.50f, 0.145f );
-				ImVec2 LClav = SkelPt( 0.39f, 0.18f );
-				ImVec2 RClav = SkelPt( 0.61f, 0.18f );
-				ImVec2 LArm = SkelPt( 0.27f, 0.30f );
-				ImVec2 RArm = SkelPt( 0.73f, 0.30f );
-				ImVec2 LHand = SkelPt( 0.18f, 0.43f );
-				ImVec2 RHand = SkelPt( 0.82f, 0.43f );
-				ImVec2 Pelvis = SkelPt( 0.50f, 0.48f );
-				ImVec2 LThigh = SkelPt( 0.40f, 0.60f );
-				ImVec2 RThigh = SkelPt( 0.60f, 0.60f );
-				ImVec2 LCalf = SkelPt( 0.38f, 0.77f );
-				ImVec2 RCalf = SkelPt( 0.62f, 0.77f );
-				ImVec2 LFoot = SkelPt( 0.35f, 0.94f );
-				ImVec2 RFoot = SkelPt( 0.65f, 0.94f );
+				// Measured against the embedded 199x394 SunketsWare silhouette.
+				ImVec2 Head = SkelPt( 0.482f, 0.090f );
+				ImVec2 Neck = SkelPt( 0.482f, 0.155f );
+				ImVec2 LClav = SkelPt( 0.300f, 0.200f );
+				ImVec2 RClav = SkelPt( 0.665f, 0.200f );
+				ImVec2 LArm = SkelPt( 0.210f, 0.330f );
+				ImVec2 RArm = SkelPt( 0.790f, 0.330f );
+				ImVec2 LHand = SkelPt( 0.095f, 0.555f );
+				ImVec2 RHand = SkelPt( 0.880f, 0.555f );
+				ImVec2 Pelvis = SkelPt( 0.482f, 0.565f );
+				ImVec2 LThigh = SkelPt( 0.400f, 0.620f );
+				ImVec2 RThigh = SkelPt( 0.580f, 0.620f );
+				ImVec2 LCalf = SkelPt( 0.350f, 0.770f );
+				ImVec2 RCalf = SkelPt( 0.630f, 0.770f );
+				ImVec2 LFoot = SkelPt( 0.332f, 0.926f );
+				ImVec2 RFoot = SkelPt( 0.646f, 0.926f );
 
 				auto* dl = ImGui::GetWindowDrawList( );
 				ImColor skelOutlineCol = g_Config.ESP->SkeletonOutlineCol;
@@ -179,7 +179,7 @@ namespace Custom
 			if ( g_Config.ESP->HeadCircle )
 			{
 				ImVec2 headC = ImVec2( iBox_X + iBox_Width * 0.5f, iBox_Y + iBox_Height * 0.10f );
-				ImColor hc = g_Config.ESP->InVisibleCol;
+				ImColor hc = g_Config.ESP->HeadCircleCol;
 				ImGui::GetWindowDrawList( )->AddCircle( headC, iBox_Width * 0.08f, ImColor( ( int ) ( hc.Value.x * 255.f ), ( int ) ( hc.Value.y * 255.f ), ( int ) ( hc.Value.z * 255.f ), ( int ) ( ImGui::GetStyle( ).Alpha * 255 ) ), 64, 2.0f );
 			}
 

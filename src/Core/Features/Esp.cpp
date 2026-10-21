@@ -830,7 +830,9 @@ void Core::Features::cEsp::Draw()
 						CircleValue = static_cast<int>((Height / 20) * visualScale);
 
 					ImVec2 center(head_screen_pos.x, head_screen_pos.y);
-					const ImColor headCircleColor = (IsFriend || Cfg->HighlightVisible) ? highlightColor : Cfg->InVisibleCol;
+					ImColor headCircleColor = Cfg->HeadCircleCol;
+					if (IsFriend || Cfg->HighlightVisible)
+						headCircleColor = highlightColor;
 					ImU32 col = headCircleColor;
 					ImU32 black = IM_COL32(0, 0, 0, 255);
 
