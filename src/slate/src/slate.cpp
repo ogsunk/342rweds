@@ -1755,7 +1755,10 @@ namespace {
         }
 
         request_player_control(entity);
-        entity.Ped->FreezePed(freeze);
+        Mem.Write<uint8_t>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x2E, freeze ? 1 : 0);
+        if (freeze) {
+            Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+        }
         NotifyManager::Send(freeze ? "Player frozen" : "Player unfrozen", 220.0f);
     }
 
@@ -1768,13 +1771,30 @@ namespace {
         request_player_control(entity);
         static std::mt19937 rng(std::random_device{}());
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        const D3DXVECTOR3 velocity{
-            dist(rng) * 12.0f,
-            dist(rng) * 12.0f,
-            18.0f
-        };
-        Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, velocity);
+
+        const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
+        Mem.Write<D3DXVECTOR3>(ped_address + 0x320, D3DXVECTOR3{
+            dist(rng) * 15.0f,
+            dist(rng) * 15.0f,
+            22.0f
+            });
         NotifyManager::Send("Player launched", 220.0f);
+    }
+
+    void lift_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+        D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
+        velocity.z = 25.0f;
+        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
+        Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
+        NotifyManager::Send("Player lifted", 220.0f);
     }
 
     void sky_teleport_player(const Core::SDK::Game::EntityStruct& entity) {
@@ -1797,14 +1817,15 @@ namespace {
         }
 
         request_player_control(entity);
-        entity.Ped->NoRagDoll(false);
-        entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
-        entity.Ped->SetConfigFlag(ePedConfigFlag::ForceRagdollUponDeath, true);
+        const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+        // 0x10A8: ragdoll byte, 0x01 = ragdoll on.
+        Mem.Write<uint8_t>(ped_address + 0x10A8, 0x01);
+        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
         D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
-        velocity.x += 1.5f;
-        velocity.y += 1.5f;
-        velocity.z += 4.0f;
-        Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, velocity);
+        velocity.x += 2.0f;
+        velocity.y += 2.0f;
+        velocity.z += 5.0f;
+        Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
         NotifyManager::Send("Ragdoll forced", 220.0f);
     }
 
@@ -1829,25 +1850,7 @@ namespace {
         auto filtered_players = scoped_players;
         filter_player_directory_entries(filtered_players, ui_state.search);
 
-        // Persistent per-player freeze positions for the Actions panel.
-        static std::unordered_map<uintptr_t, D3DXVECTOR3> frozen_player_positions;
-        for (auto it = frozen_player_positions.begin(); it != frozen_player_positions.end();) {
-            bool found = false;
-            for (const auto& entity : scoped_players) {
-                if (reinterpret_cast<uintptr_t>(entity.Ped) == it->first) {
-                    entity.Ped->SetPos(it->second);
-                    found = true;
-                    break;
-                }
-            }
 
-            if (!found) {
-                it = frozen_player_positions.erase(it);
-            }
-            else {
-                ++it;
-            }
-        }
 
         const int selected_index = find_player_selection_index(filtered_players, ui_state.selected_player_ptr, ui_state.selected_player_id);
         Core::SDK::Game::EntityStruct selected_player{};
@@ -2060,23 +2063,13 @@ namespace {
                         action_button("Heal", "Heal Player", [&] { set_player_health(selected_player, 200.0f, "Player healed"); });
                         action_button("Armor+", "Give Armor", [&] { set_player_armor(selected_player, 100.0f, "Armor given"); });
                         action_button("Armor-", "Remove Armor", [&] { set_player_armor(selected_player, 0.0f, "Armor removed"); });
-                        action_button("Freeze", "Freeze Player", [&] {
-                            if (selected_player.Ped) {
-                                frozen_player_positions[reinterpret_cast<uintptr_t>(selected_player.Ped)] = selected_player.Ped->GetPos();
-                                NotifyManager::Send("Player frozen", 220.0f);
-                            }
-                            });
-                        action_button("Unfreeze", "Unfreeze Player", [&] {
-                            if (selected_player.Ped) {
-                                frozen_player_positions.erase(reinterpret_cast<uintptr_t>(selected_player.Ped));
-                                NotifyManager::Send("Player unfrozen", 220.0f);
-                            }
-                            });
+                        action_button("Freeze", "Freeze Player", [&] { freeze_player(selected_player, true); });
+                        action_button("Unfreeze", "Unfreeze Player", [&] { freeze_player(selected_player, false); });
                         action_button("Launch", "Launch Player", [&] { launch_player(selected_player); });
                         action_button("Sky TP", "Sky Teleport Player", [&] { sky_teleport_player(selected_player); });
                         action_button("Ragdoll", "Force Ragdoll", [&] { force_ragdoll_player(selected_player); });
                         action_button("Pull Car", "Pull Their Vehicle To You", [&] { pull_local_vehicle_to_target(selected_player); });
-                        action_button("Lift", "Lift Target", [&] { lift_local_vehicle_on_target(selected_player); });
+                        action_button("Lift", "Lift Player", [&] { lift_player(selected_player); });
                         action_button("Friend", "Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
                         action_button("Name", "Copy Name", [&] { copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable"); });
                         action_button("Discord", "Copy Discord ID", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.DiscordId, "Discord ID copied", "Discord ID unavailable"); });
