@@ -1695,6 +1695,122 @@ namespace {
         NotifyManager::Send("Teleported to player", 220.0f);
     }
 
+    void request_player_control(const Core::SDK::Game::EntityStruct& entity) {
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (!local_player || !entity.Ped) {
+            return;
+        }
+
+        auto* local_info = local_player->GetPlayerInfo();
+        if (!local_info) {
+            return;
+        }
+
+        network_request_control_of_entity(
+            reinterpret_cast<uintptr_t>(entity.Ped),
+            reinterpret_cast<uintptr_t>(local_info));
+    }
+
+    void teleport_player_to_me(const Core::SDK::Game::EntityStruct& entity) {
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (!local_player || !entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        D3DXVECTOR3 target_position = local_player->GetPos();
+        target_position.y += 1.5f;
+        target_position.z += 0.1f;
+        entity.Ped->SetPos(target_position);
+        NotifyManager::Send("Player teleported to you", 220.0f);
+    }
+
+    void set_player_health(const Core::SDK::Game::EntityStruct& entity, float health, const char* message) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        entity.Ped->SetHealth(health);
+        NotifyManager::Send(message, 220.0f);
+    }
+
+    void set_player_armor(const Core::SDK::Game::EntityStruct& entity, float armor, const char* message) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        entity.Ped->SetArmor(armor);
+        NotifyManager::Send(message, 220.0f);
+    }
+
+    void freeze_player(const Core::SDK::Game::EntityStruct& entity, bool freeze) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        entity.Ped->FreezePed(freeze);
+        NotifyManager::Send(freeze ? "Player frozen" : "Player unfrozen", 220.0f);
+    }
+
+    void launch_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        const D3DXVECTOR3 velocity{
+            dist(rng) * 12.0f,
+            dist(rng) * 12.0f,
+            18.0f
+        };
+        Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, velocity);
+        NotifyManager::Send("Player launched", 220.0f);
+    }
+
+    void sky_teleport_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        D3DXVECTOR3 target_position = entity.Ped->GetPos();
+        target_position.z += 60.0f;
+        entity.Ped->SetPos(target_position);
+        NotifyManager::Send("Player sky teleported", 220.0f);
+    }
+
+    void force_ragdoll_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        entity.Ped->NoRagDoll(false);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::ForceRagdollUponDeath, true);
+        D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
+        velocity.x += 1.5f;
+        velocity.y += 1.5f;
+        velocity.z += 4.0f;
+        Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, velocity);
+        NotifyManager::Send("Ragdoll forced", 220.0f);
+    }
+
+    void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);
+    void lift_local_vehicle_on_target(const Core::SDK::Game::EntityStruct& entity);
+
     struct player_directory_ui_state_t {
         char search[64]{};
         uintptr_t selected_player_ptr = 0;
@@ -1712,6 +1828,26 @@ namespace {
 
         auto filtered_players = scoped_players;
         filter_player_directory_entries(filtered_players, ui_state.search);
+
+        // Persistent per-player freeze positions for the Actions panel.
+        static std::unordered_map<uintptr_t, D3DXVECTOR3> frozen_player_positions;
+        for (auto it = frozen_player_positions.begin(); it != frozen_player_positions.end();) {
+            bool found = false;
+            for (const auto& entity : scoped_players) {
+                if (reinterpret_cast<uintptr_t>(entity.Ped) == it->first) {
+                    entity.Ped->SetPos(it->second);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                it = frozen_player_positions.erase(it);
+            }
+            else {
+                ++it;
+            }
+        }
 
         const int selected_index = find_player_selection_index(filtered_players, ui_state.selected_player_ptr, ui_state.selected_player_id);
         Core::SDK::Game::EntityStruct selected_player{};
@@ -1754,7 +1890,7 @@ namespace {
                     PushStyleColor(ImGuiCol_Header, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{ 0.f, 0.f, 0.f, 0.f });
                     PushStyleColor(ImGuiCol_HeaderActive, ImVec4{ 0.f, 0.f, 0.f, 0.f });
-                    BeginChild("##player_directory_entries", { 0, 260 ds }, true, ImGuiWindowFlags_NoBackground);
+                    BeginChild("##player_directory_entries", { 0, 400 ds }, true, ImGuiWindowFlags_NoBackground);
                     for (const auto& entity : filtered_players) {
                         const bool is_selected = has_selected_player &&
                             (selected_player.Id == entity.Id || selected_player.Ped == entity.Ped);
@@ -1824,7 +1960,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, 280 ds }, true);
                     {
                         Text("Actions");
 
@@ -1880,7 +2016,7 @@ namespace {
                     widgets->spacing(6 ds);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
-                    BeginChild("##selected_player_actions", { 0, 128 ds }, true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+                    BeginChild("##selected_player_actions", { 0, 280 ds }, true);
                     {
                         Text("Actions");
 
@@ -1888,29 +2024,66 @@ namespace {
                         widgets->separator();
                         widgets->spacing(6 ds);
 
-                        bool friend_state = selected_player.IsFriend;
-                        if (widgets->checkbox("", "Friend", &friend_state)) {
-                            set_player_friend_state(selected_player, friend_state);
-                        }
+                        const std::string player_name = selected_player.NetworkInfo.UserName.empty()
+                            ? make_safe_ui_label(get_player_display_name(selected_player))
+                            : make_safe_ui_label(selected_player.NetworkInfo.UserName);
 
-                        widgets->spacing(6 ds);
-
-                        const float button_width = GetContentRegionAvail().x;
                         PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
                         PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
                         PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
                         PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.28f).vec4());
-                        if (widgets->button("Teleport To Player", { button_width, 32 ds })) {
-                            teleport_to_player(selected_player);
-                        }
 
-                        widgets->spacing(4 ds);
-                        const std::string player_name = selected_player.NetworkInfo.UserName.empty()
-                            ? make_safe_ui_label(get_player_display_name(selected_player))
-                            : make_safe_ui_label(selected_player.NetworkInfo.UserName);
-                        if (widgets->button("Copy Name", { button_width, 32 ds })) {
-                            copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable");
-                        }
+                        const float action_gap = 6 ds;
+                        const float action_button_width = (GetContentRegionAvail().x - action_gap) * 0.5f;
+                        int action_column = 0;
+                        auto action_button = [&](const char* label, auto&& callback) {
+                            if (widgets->button(label, { action_button_width, 30 ds })) {
+                                callback();
+                            }
+
+                            if (action_column == 0) {
+                                SameLine(0, action_gap);
+                                action_column = 1;
+                            }
+                            else {
+                                action_column = 0;
+                            }
+                            };
+
+                        action_button("Teleport To", [&] { teleport_to_player(selected_player); });
+                        action_button("Teleport To Me", [&] { teleport_player_to_me(selected_player); });
+                        action_button("Kill", [&] { set_player_health(selected_player, 0.0f, "Player killed"); });
+                        action_button("Heal", [&] { set_player_health(selected_player, 200.0f, "Player healed"); });
+                        action_button("Give Armor", [&] { set_player_armor(selected_player, 100.0f, "Armor given"); });
+                        action_button("Remove Armor", [&] { set_player_armor(selected_player, 0.0f, "Armor removed"); });
+                        action_button("Freeze", [&] {
+                            if (selected_player.Ped) {
+                                frozen_player_positions[reinterpret_cast<uintptr_t>(selected_player.Ped)] = selected_player.Ped->GetPos();
+                                NotifyManager::Send("Player frozen", 220.0f);
+                            }
+                            });
+                        action_button("Unfreeze", [&] {
+                            if (selected_player.Ped) {
+                                frozen_player_positions.erase(reinterpret_cast<uintptr_t>(selected_player.Ped));
+                                NotifyManager::Send("Player unfrozen", 220.0f);
+                            }
+                            });
+                        action_button("Launch", [&] { launch_player(selected_player); });
+                        action_button("Sky TP", [&] { sky_teleport_player(selected_player); });
+                        action_button("Ragdoll", [&] { force_ragdoll_player(selected_player); });
+                        action_button("Pull Vehicle", [&] { pull_local_vehicle_to_target(selected_player); });
+                        action_button("Lift Target", [&] { lift_local_vehicle_on_target(selected_player); });
+                        action_button("Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
+                        action_button("Copy Name", [&] { copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable"); });
+                        action_button("Copy Discord", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.DiscordId, "Discord ID copied", "Discord ID unavailable"); });
+                        action_button("Copy Steam", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.SteamId, "Steam ID copied", "Steam ID unavailable"); });
+                        action_button("Copy Coords", [&] {
+                            char coordinates[64]{};
+                            const D3DXVECTOR3 position = selected_player.Ped ? selected_player.Ped->GetPos() : D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+                            std::snprintf(coordinates, sizeof(coordinates), "%.1f, %.1f, %.1f", position.x, position.y, position.z);
+                            copy_player_value_to_clipboard(coordinates, "Coordinates copied", "Coordinates unavailable");
+                            });
+
                         PopStyleColor(3);
                         PopStyleVar();
                     }
