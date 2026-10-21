@@ -1750,6 +1750,8 @@ namespace {
     }
 
     bool native_set_entity_velocity(uintptr_t entity, float x, float y, float z);
+    bool native_freeze_entity(uintptr_t entity, bool freeze);
+    void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms = 400);
 
     void freeze_player(const Core::SDK::Game::EntityStruct& entity, bool freeze) {
         if (!entity.Ped) {
@@ -1758,14 +1760,30 @@ namespace {
         }
 
         request_player_control(entity);
-        Mem.Write<uint8_t>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x2E, freeze ? 1 : 0);
-        if (freeze) {
-            Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(entity.Ped) + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+        const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+
+        // FREEZE_ENTITY_POSITION only sets a flag, so it is safe to call from
+        // our remote thread (unlike task natives such as SET_PED_TO_RAGDOLL).
+        if (native_freeze_entity(ped_address, freeze)) {
+            if (freeze) {
+                Mem.Write<D3DXVECTOR3>(ped_address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+            }
+            NotifyManager::Send(freeze ? "Player frozen" : "Player unfrozen", 220.0f);
+            return;
         }
-        NotifyManager::Send(freeze ? "Player frozen" : "Player unfrozen", 220.0f);
+
+        // Fallback: hold the ped in place by zeroing its velocity for a while.
+        if (freeze) {
+            Mem.Write<D3DXVECTOR3>(ped_address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+            queue_player_impulse(entity.Ped, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f }, 8000);
+            NotifyManager::Send("Player frozen (velocity hold)", 220.0f);
+        }
+        else {
+            NotifyManager::Send("Player unfrozen", 220.0f);
+        }
     }
 
-    void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms = 400) {
+    void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms) {
         if (!ped) {
             return;
         }
@@ -1840,22 +1858,24 @@ namespace {
         request_player_control(entity);
         const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
 
-        // Use the ped's own no-ragdoll helper instead of hard-coded offsets.
-        // 0x10A8 is PlayerInfo on current builds and writing it crashes.
-        entity.Ped->NoRagDoll(false);
+        // SET_PED_TO_RAGDOLL creates a task and needs the game's script-thread
+        // TLS, so calling it from an external remote thread crashes the game.
+        // Instead, clear the ragdoll blockers and knock the ped over.
+        entity.Ped->NoRagDoll(false); // 0x20 -> ragdoll allowed
         entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
         entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromAnyPedImpact, false);
         entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromMelee, false);
         entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromBulletImpact, false);
-        Mem.Write<uint8_t>(ped_address + 0x2E, 0);
+        entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromVehicleImpact, false);
 
         D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
-        velocity.x += 2.0f;
-        velocity.y += 2.0f;
-        velocity.z += 5.0f;
+        velocity.x += 4.0f;
+        velocity.y += 4.0f;
+        velocity.z += 9.0f;
         Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
-        queue_player_impulse(entity.Ped, velocity, 250);
-        NotifyManager::Send("Ragdoll forced", 220.0f);
+        queue_player_impulse(entity.Ped, velocity, 400);
+        native_set_entity_velocity(ped_address, velocity.x, velocity.y, velocity.z);
+        NotifyManager::Send("Player knocked down", 220.0f);
     }
 
     bool native_ragdoll_player(const Core::SDK::Game::EntityStruct& entity) {
@@ -1949,6 +1969,215 @@ namespace {
             Core::Features::NativeCaller::FloatBits(z)
         };
         return Core::Features::NativeCaller::InvokeNative(0x1C99BB7B6E96D16Full, args);
+    }
+
+    bool native_freeze_entity(uintptr_t entity, bool freeze) {
+        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(entity);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x428CA6DBD1094446ull, { handle, freeze ? 1ull : 0ull });
+    }
+
+    bool native_set_entity_coords(uintptr_t entity, float x, float y, float z) {
+        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(entity);
+        if (!handle) {
+            return false;
+        }
+
+        const std::vector<uint64_t> args = {
+            handle,
+            Core::Features::NativeCaller::FloatBits(x),
+            Core::Features::NativeCaller::FloatBits(y),
+            Core::Features::NativeCaller::FloatBits(z),
+            0, 0, 0, 1
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x06843DA7060A026Bull, args);
+    }
+
+    bool native_attach_entity_to_entity(uintptr_t child, uintptr_t parent) {
+        if (!child || !parent || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t child_handle = Core::Features::NativeCaller::PointerToHandle(child);
+        const uint32_t parent_handle = Core::Features::NativeCaller::PointerToHandle(parent);
+        if (!child_handle || !parent_handle) {
+            return false;
+        }
+
+        const std::vector<uint64_t> args = {
+            child_handle, parent_handle, 0,   // entity1, entity2, boneIndex
+            0, 0, 0,                          // offset
+            0, 0, 0,                          // rotation
+            0, 1, 1, 0, 0, 1                  // p9, softPin, collision, isPed, vertex, fixedRot
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x6B9BBD38AB0796DFull, args);
+    }
+
+    bool native_set_entity_health(uintptr_t entity, int health) {
+        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(entity);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x6B76DC1F3AE6E6A3ull, { handle, static_cast<uint64_t>(static_cast<uint32_t>(health)), 0 });
+    }
+
+    bool native_set_ped_armour(uintptr_t ped, int amount) {
+        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0xCEA04D83135264CCull, { handle, static_cast<uint64_t>(static_cast<uint32_t>(amount)) });
+    }
+
+    bool native_explode_ped_head(uintptr_t ped) {
+        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x2D05CED3A38D0F3Aull, { handle, 0 });
+    }
+
+    bool native_shoot_at_entity(uintptr_t shooter, uintptr_t target) {
+        if (!shooter || !target || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t shooter_handle = Core::Features::NativeCaller::PointerToHandle(shooter);
+        if (!shooter_handle) {
+            return false;
+        }
+
+        const D3DXVECTOR3 from = reinterpret_cast<CPed*>(shooter)->GetPos();
+        const D3DXVECTOR3 to = reinterpret_cast<CPed*>(target)->GetPos();
+
+        const std::vector<uint64_t> args = {
+            Core::Features::NativeCaller::FloatBits(from.x),
+            Core::Features::NativeCaller::FloatBits(from.y),
+            Core::Features::NativeCaller::FloatBits(from.z + 0.5f),
+            Core::Features::NativeCaller::FloatBits(to.x),
+            Core::Features::NativeCaller::FloatBits(to.y),
+            Core::Features::NativeCaller::FloatBits(to.z + 0.5f),
+            100,                              // damage
+            1,                                // p7 (force)
+            0x1B06D571,                       // WEAPON_PISTOL
+            shooter_handle,                   // owner
+            1, 0,                             // audible, invisible
+            Core::Features::NativeCaller::FloatBits(250.0f)
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x867654CBC7606F2Cull, args);
+    }
+
+    void bring_player_to_me(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (!local_player) {
+            NotifyManager::Send("Local player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        const D3DXVECTOR3 position = local_player->GetPos();
+        const D3DXVECTOR3 target{ position.x, position.y, position.z + 1.0f };
+        if (!native_set_entity_coords(reinterpret_cast<uintptr_t>(entity.Ped), target.x, target.y, target.z)) {
+            entity.Ped->SetPos(target);
+        }
+        NotifyManager::Send("Player brought to you", 220.0f);
+    }
+
+    void send_player_to_sky(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        request_player_control(entity);
+        D3DXVECTOR3 position = entity.Ped->GetPos();
+        position.z += 150.0f;
+        if (!native_set_entity_coords(reinterpret_cast<uintptr_t>(entity.Ped), position.x, position.y, position.z)) {
+            entity.Ped->SetPos(position);
+        }
+        NotifyManager::Send("Player sent to the sky", 220.0f);
+    }
+
+    void attach_player_to_me(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (!local_player) {
+            NotifyManager::Send("Local player unavailable", 220.0f);
+            return;
+        }
+
+        if (!native_attach_entity_to_entity(reinterpret_cast<uintptr_t>(entity.Ped), reinterpret_cast<uintptr_t>(local_player))) {
+            NotifyManager::Send("Attach native unavailable", 220.0f);
+            return;
+        }
+        NotifyManager::Send("Player attached to you", 220.0f);
+    }
+
+    void shoot_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (!local_player) {
+            NotifyManager::Send("Local player unavailable", 220.0f);
+            return;
+        }
+
+        if (!native_shoot_at_entity(reinterpret_cast<uintptr_t>(local_player), reinterpret_cast<uintptr_t>(entity.Ped))) {
+            NotifyManager::Send("Shoot native unavailable", 220.0f);
+            return;
+        }
+        NotifyManager::Send("Shot at player", 220.0f);
+    }
+
+    void native_armor_player(const Core::SDK::Game::EntityStruct& entity, int amount) {
+        if (!entity.Ped) {
+            NotifyManager::Send("Player unavailable", 220.0f);
+            return;
+        }
+
+        if (!native_set_ped_armour(reinterpret_cast<uintptr_t>(entity.Ped), amount)) {
+            NotifyManager::Send("Armor native unavailable", 220.0f);
+            return;
+        }
+        NotifyManager::Send("Armor given (native)", 220.0f);
     }
 
     void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);
@@ -2189,14 +2418,7 @@ namespace {
                         action_button("Unfreeze", "Unfreeze Player", [&] { freeze_player(selected_player, false); });
                         action_button("Launch", "Launch Player", [&] { launch_player(selected_player); });
                         action_button("Sky TP", "Sky Teleport Player", [&] { sky_teleport_player(selected_player); });
-                        action_button("Ragdoll", "Force Ragdoll", [&] {
-                            if (native_ragdoll_player(selected_player)) {
-                                NotifyManager::Send("Ragdoll (native)", 220.0f);
-                            }
-                            else {
-                                force_ragdoll_player(selected_player);
-                            }
-                            });
+                        action_button("Ragdoll", "Knock Player Down", [&] { force_ragdoll_player(selected_player); });
                         action_button("Burn", "Burn Player", [&] {
                             if (!native_burn_player(selected_player)) {
                                 NotifyManager::Send("Burn native unavailable", 220.0f);
@@ -2214,6 +2436,15 @@ namespace {
                             });
                         action_button("Pull Car", "Pull Their Vehicle To You", [&] { pull_local_vehicle_to_target(selected_player); });
                         action_button("Lift", "Lift Player", [&] { lift_player(selected_player); });
+                        action_button("Bring", "Teleport Player To You", [&] { bring_player_to_me(selected_player); });
+                        action_button("Sky", "Send Player To The Sky", [&] { send_player_to_sky(selected_player); });
+                        action_button("Attach", "Attach Player To You", [&] { attach_player_to_me(selected_player); });
+                        action_button("Head", "Explode Player Head", [&] {
+                            if (!native_explode_ped_head(reinterpret_cast<uintptr_t>(selected_player.Ped))) {
+                                NotifyManager::Send("Head explode unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Shoot", "Shoot Player", [&] { shoot_player(selected_player); });
                         action_button("Friend", "Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
                         action_button("Name", "Copy Name", [&] { copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable"); });
                         action_button("Discord", "Copy Discord ID", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.DiscordId, "Discord ID copied", "Discord ID unavailable"); });
@@ -6218,10 +6449,10 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_KEYBOARD, "Keybind List", &g_Config.General->KeybindList);
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
                 widgets->checkbox(I_EYE__OFF, "Stream Proof", &g_Config.General->StreamProof); 
-                widgets->checkbox(I_EYE__BOLT, "Experimental Natives", &g_Config.General->NativeFeatures);
+                widgets->checkbox(I_EYE__BOLT, "Experiment Mode (UNSAFE!)", &g_Config.General->NativeFeatures);
                 if (widgets->button("Test Native Caller", { 180 ds, 26 ds })) {
                     if (!g_Config.General->NativeFeatures) {
-                        NotifyManager::Send("Enable Experimental Natives first", 300.0f);
+                        NotifyManager::Send("Enable Experiment Mode first", 300.0f);
                     }
                     else {
                         std::string status = Core::Features::NativeCaller::Diagnostics();
