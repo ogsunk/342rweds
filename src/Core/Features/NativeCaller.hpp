@@ -131,6 +131,79 @@ namespace Core::Features::NativeCaller
 		return result;
 	}
 
+	inline uintptr_t FindPatternInRange(const char* pattern, uintptr_t base, size_t size)
+	{
+		if (!pattern || !base || !size)
+			return 0;
+
+		std::vector<uint8_t> signature;
+		std::vector<bool> mask;
+		std::stringstream stream(pattern);
+		std::string token;
+		while (stream >> token)
+		{
+			if (token == "?" || token == "??")
+			{
+				signature.push_back(0);
+				mask.push_back(false);
+			}
+			else
+			{
+				signature.push_back(static_cast<uint8_t>(std::stoul(token, nullptr, 16)));
+				mask.push_back(true);
+			}
+		}
+
+		if (signature.empty())
+			return 0;
+
+		uintptr_t address = base;
+		while (address < base + size)
+		{
+			MEMORY_BASIC_INFORMATION mbi{};
+			if (!VirtualQueryEx(Mem.ProcHandle, reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)))
+				break;
+
+			const uintptr_t region_base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+			const size_t region_size = mbi.RegionSize;
+
+			const bool readable = mbi.State == MEM_COMMIT &&
+				(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+
+			if (readable && region_size >= signature.size())
+			{
+				std::vector<uint8_t> buffer(region_size);
+				SIZE_T bytes_read = 0;
+				if (ReadProcessMemory(Mem.ProcHandle, reinterpret_cast<LPCVOID>(region_base), buffer.data(), region_size, &bytes_read) &&
+					bytes_read >= signature.size())
+				{
+					for (size_t i = 0; i + signature.size() <= bytes_read; ++i)
+					{
+						bool found = true;
+						for (size_t j = 0; j < signature.size(); ++j)
+						{
+							if (mask[j] && buffer[i + j] != signature[j])
+							{
+								found = false;
+								break;
+							}
+						}
+
+						if (found)
+							return region_base + i;
+					}
+				}
+			}
+
+			if (region_size == 0)
+				break;
+
+			address = region_base + region_size;
+		}
+
+		return 0;
+	}
+
 	inline uintptr_t ResolveExport(uintptr_t module_base, const char* name_part)
 	{
 		if (!module_base || !name_part)
@@ -286,6 +359,29 @@ namespace Core::Features::NativeCaller
 					if (short_pattern_rage)
 					{
 						g_pointer_to_handle = short_pattern_rage - 0x15;
+					}
+				}
+			}
+
+			if (!g_pointer_to_handle)
+			{
+				const uintptr_t brute_main = FindPatternInRange(
+					"48 8B F9 48 83 C1 10 33 DB",
+					Mem.ModBase,
+					Mem.ModBaseSize);
+				if (brute_main)
+				{
+					g_pointer_to_handle = brute_main - 0x15;
+				}
+				else if (g_rage_base && g_rage_base != Mem.ModBase)
+				{
+					const uintptr_t brute_rage = FindPatternInRange(
+						"48 8B F9 48 83 C1 10 33 DB",
+						g_rage_base,
+						g_rage_size);
+					if (brute_rage)
+					{
+						g_pointer_to_handle = brute_rage - 0x15;
 					}
 				}
 			}
