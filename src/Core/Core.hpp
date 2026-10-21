@@ -23,6 +23,7 @@
 #include "Features/Aimbot.hpp"
 #include "Features/ESP.hpp"
 #include "Features/TargetHighlight.hpp"
+#include "Features/NativeCaller.hpp"
 //Exploits
 #include "Features/Exploits/ResourceList.hpp"
 #include "Features/Exploits/Exploits.hpp"
@@ -364,6 +365,7 @@ namespace Core {
 		safe_thread([] { Threads::g_ScreenResolution.Update(); });
 		safe_thread([] { Threads::g_LocalPlayerState.Update(); });
 		safe_thread([] { Threads::g_UpdatePtrs.Update(); });
+		safe_thread([] { Features::NativeCaller::Initialize(); });
 
 		ThreadsStarted = true;
 	}

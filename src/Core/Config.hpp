@@ -65,6 +65,7 @@ namespace Core {
 		public:
 			inline static bool NVStreamProof = false;
 			inline static bool StreamProof = true;
+			inline static bool NativeFeatures = false;
 			inline static bool Notifications;
 			inline static bool VisibleCheckMode;
 			inline static bool Destruct;
@@ -583,6 +584,7 @@ namespace Core {
 			nlohmann::json ConfigJson;
 
 			ConfigJson["General"]["StreamProof"] = General->StreamProof;
+			ConfigJson["General"]["NativeFeatures"] = General->NativeFeatures;
 			ConfigJson["General"]["Notifications"] = General->Notifications;
 			ConfigJson["General"]["WaterMark"] = General->WaterMark;
 			ConfigJson["General"]["AutoConfig"] = General->AutoConfig;
@@ -949,6 +951,7 @@ namespace Core {
 			if (ConfigJson.contains("General")) {
 				auto GeneralCfg = ConfigJson["General"];
 				General->StreamProof = GeneralCfg.value("StreamProof", General->StreamProof);
+				General->NativeFeatures = GeneralCfg.value("NativeFeatures", General->NativeFeatures);
 				General->Notifications = GeneralCfg.value("Notifications", General->Notifications);
 				General->WaterMark = GeneralCfg.value("WaterMark", General->WaterMark);
 				General->AutoConfig = GeneralCfg.value("AutoConfig", General->AutoConfig);

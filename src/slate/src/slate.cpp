@@ -11,6 +11,7 @@
 #include "Core/features/nvidia.hpp"
 #include "Core/features/auth.hpp"
 #include <Core/SDK/SDK.hpp>
+#include <Core/Features/NativeCaller.hpp>
 #include "includes/includes.hpp"
 #include <Includes/CustomWidgets/Notify.hpp>
 #include <Includes/CustomWidgets/Preview.hpp>
@@ -1853,6 +1854,80 @@ namespace {
         NotifyManager::Send("Ragdoll forced", 220.0f);
     }
 
+    bool native_ragdoll_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(entity.Ped));
+        if (!handle) {
+            return false;
+        }
+
+        const std::vector<uint64_t> args = {
+            handle,
+            3000,
+            10000,
+            0,
+            0,
+            0,
+            0
+        };
+        return Core::Features::NativeCaller::InvokeNative(0xAE99FB955581844Aull, args);
+    }
+
+    bool native_burn_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(entity.Ped));
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0xF6A9D9708F6F23DFull, { handle });
+    }
+
+    bool native_explode_player(const Core::SDK::Game::EntityStruct& entity) {
+        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const D3DXVECTOR3 position = entity.Ped->GetPos();
+        const std::vector<uint64_t> args = {
+            Core::Features::NativeCaller::FloatBits(position.x),
+            Core::Features::NativeCaller::FloatBits(position.y),
+            Core::Features::NativeCaller::FloatBits(position.z),
+            2,
+            Core::Features::NativeCaller::FloatBits(1.0f),
+            1,
+            0,
+            Core::Features::NativeCaller::FloatBits(1.0f),
+            0
+        };
+        return Core::Features::NativeCaller::InvokeNative(0xE3AD2BDBAEE269ACull, args);
+    }
+
+    bool native_damage_player(const Core::SDK::Game::EntityStruct& entity, float damage) {
+        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(entity.Ped));
+        if (!handle) {
+            return false;
+        }
+
+        const std::vector<uint64_t> args = {
+            handle,
+            Core::Features::NativeCaller::FloatBits(damage),
+            0,
+            0
+        };
+        return Core::Features::NativeCaller::InvokeNative(0x697157CED63F18D4ull, args);
+    }
+
     void pull_local_vehicle_to_target(const Core::SDK::Game::EntityStruct& entity);
     void lift_local_vehicle_on_target(const Core::SDK::Game::EntityStruct& entity);
 
@@ -2091,7 +2166,29 @@ namespace {
                         action_button("Unfreeze", "Unfreeze Player", [&] { freeze_player(selected_player, false); });
                         action_button("Launch", "Launch Player", [&] { launch_player(selected_player); });
                         action_button("Sky TP", "Sky Teleport Player", [&] { sky_teleport_player(selected_player); });
-                        action_button("Ragdoll", "Force Ragdoll", [&] { force_ragdoll_player(selected_player); });
+                        action_button("Ragdoll", "Force Ragdoll", [&] {
+                            if (native_ragdoll_player(selected_player)) {
+                                NotifyManager::Send("Ragdoll (native)", 220.0f);
+                            }
+                            else {
+                                force_ragdoll_player(selected_player);
+                            }
+                            });
+                        action_button("Burn", "Burn Player", [&] {
+                            if (!native_burn_player(selected_player)) {
+                                NotifyManager::Send("Burn native unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Explode", "Explode Player", [&] {
+                            if (!native_explode_player(selected_player)) {
+                                NotifyManager::Send("Explode native unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Damage", "Apply Damage", [&] {
+                            if (!native_damage_player(selected_player, 100.0f)) {
+                                NotifyManager::Send("Damage native unavailable", 220.0f);
+                            }
+                            });
                         action_button("Pull Car", "Pull Their Vehicle To You", [&] { pull_local_vehicle_to_target(selected_player); });
                         action_button("Lift", "Lift Player", [&] { lift_player(selected_player); });
                         action_button("Friend", "Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
@@ -2387,6 +2484,19 @@ namespace {
 
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
         NotifyManager::Send("Vehicle destroyed", 220.0f);
+    }
+
+    bool native_explode_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
+        if (!vehicle.Pointer || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(vehicle.Pointer));
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0x301A42153C9AD707ull, { handle, 1, 0, 0 });
     }
 
     void fling_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
@@ -5598,7 +5708,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         action_button("Void", "Void Vehicle", [&] { void_vehicle(selected_vehicle); });
                         action_button(locked ? "Unlock" : "Lock", "Lock / Unlock Vehicle", [&] { toggle_vehicle_lock(selected_vehicle); });
                         action_button("God", "Toggle Vehicle Godmode", [&] { toggle_vehicle_godmode(selected_vehicle); });
-                        action_button("Explode", "Explode Vehicle", [&] { explode_vehicle(selected_vehicle); });
+                        action_button("Explode", "Explode Vehicle", [&] {
+                            if (!native_explode_vehicle(selected_vehicle)) {
+                                explode_vehicle(selected_vehicle);
+                            }
+                            });
                         action_button("Name", "Copy Vehicle Name", [&] { copy_player_value_to_clipboard(get_vehicle_display_name(selected_vehicle), "Vehicle name copied", "Vehicle name unavailable"); });
                         action_button("Driver", "Copy Driver Name", [&] { copy_player_value_to_clipboard(get_vehicle_driver_name(selected_vehicle), "Driver name copied", "Driver name unavailable"); });
                         action_button("Coords", "Copy Vehicle Coordinates", [&] {
@@ -6075,6 +6189,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_KEYBOARD, "Keybind List", &g_Config.General->KeybindList);
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
                 widgets->checkbox(I_EYE__OFF, "Stream Proof", &g_Config.General->StreamProof); 
+                widgets->checkbox(I_EYE__BOLT, "Experimental Natives", &g_Config.General->NativeFeatures);
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
                 //    std::thread([&] { NvidiaProofing::Execute(g_Config.General->NVStreamProof);}).detach();
                 //}
