@@ -1037,6 +1037,7 @@ namespace {
                         fetched_profile.discord_id = discord_identity.id;
                     }
                     fetched_profile.discord_username = discord_identity.username;
+                    fetched_profile.discord_avatar_hash = discord_identity.avatar_hash;
                     if (fetched_profile.discord_display_name.empty()) {
                         fetched_profile.discord_display_name = discord_identity.username;
                     }
@@ -1045,6 +1046,14 @@ namespace {
                 // Resolve the avatar/display profile over HTTP using the Discord ID.
                 if (!fetched_profile.discord_id.empty()) {
                     auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
+                }
+
+                if (fetched_profile.discord_avatar_url.empty() &&
+                    !fetched_profile.discord_id.empty() &&
+                    !fetched_profile.discord_avatar_hash.empty()) {
+                    fetched_profile.discord_avatar_url =
+                        "https://cdn.discordapp.com/avatars/" + fetched_profile.discord_id + "/" +
+                        fetched_profile.discord_avatar_hash + ".png?size=128";
                 }
             }
 

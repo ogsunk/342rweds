@@ -39,6 +39,7 @@ namespace auth {
 		std::string discord_id;
 		std::string discord_display_name;
 		std::string discord_username;
+		std::string discord_avatar_hash;
 		std::string discord_avatar_url;
 		bool admin = false;
 		bool staff = false;
@@ -850,7 +851,7 @@ namespace auth {
 	}
 
 	inline bool PopulateDiscordProfile(AccountProfile& profile, std::string* raw = nullptr) {
-		if (!profile.discord_avatar_url.empty() || !profile.discord_display_name.empty()) {
+		if (!profile.discord_avatar_url.empty() && !profile.discord_display_name.empty()) {
 			return true;
 		}
 		if (profile.discord_id.empty()) {

@@ -336,14 +336,21 @@ public:
 			return;
 
 		std::unique_ptr< std::remove_pointer_t< HINTERNET >, decltype( &InternetCloseHandle ) >
-			hInternet(InternetOpenA("ImGui ImageLoader", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0), InternetCloseHandle);
+			hInternet(InternetOpenA("SunketsWare/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0), InternetCloseHandle);
 
 		if (!hInternet) {
 			throw std::runtime_error("InternetOpenA failed");
 		}
 
 		std::unique_ptr< std::remove_pointer_t< HINTERNET >, decltype( &InternetCloseHandle ) >
-			hURL( InternetOpenUrlA( hInternet.get( ), url.data( ), NULL, 0, INTERNET_FLAG_RELOAD, 0 ), InternetCloseHandle );
+			hURL( InternetOpenUrlA(
+				hInternet.get(),
+				url.data(),
+				"Accept: image/avif,image/webp,image/apng,image/png,image/jpeg,image/*;q=0.8\r\n",
+				-1,
+				INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_SECURE,
+				0),
+			InternetCloseHandle );
 
 		if ( !hURL ) {
 			throw std::runtime_error( "InternetOpenUrl failed" );
