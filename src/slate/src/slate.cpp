@@ -5978,10 +5978,32 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                         draw_seasonal_logo_widget(vec2{ 34.f, 34.f });
                         SameLine(0, 4.f ds);
                         SetCursorPosY(GetCursorPosY() + 9.f ds);
-                        TextColored(g_style->col(pcol_text), "Sunkets");
-                        SameLine(0, 0);
-                        SetCursorPosY(GetCursorPosY() + 2.f ds);
-                        TextColored(g_style->col(pcol_scheme), "Ware");
+
+                        // Draw both brand words at the exact same baseline. Using
+                        // two TextColored items with cursor offsets caused "Ware"
+                        // to drift vertically depending on font metrics.
+                        const ImVec2 brand_pos = GetCursorScreenPos();
+                        ImFont* brand_font = GetFont();
+                        const float brand_font_size = GetFontSize();
+                        const float sunkets_width = CalcTextSize("Sunkets").x;
+                        const float ware_width = CalcTextSize("Ware").x;
+                        auto* brand_draw = GetWindowDrawList();
+
+                        brand_draw->AddText(
+                            brand_font,
+                            brand_font_size,
+                            brand_pos,
+                            GetColorU32(g_style->col(pcol_text).vec4()),
+                            "Sunkets");
+
+                        brand_draw->AddText(
+                            brand_font,
+                            brand_font_size,
+                            ImVec2{ brand_pos.x + sunkets_width, brand_pos.y },
+                            GetColorU32(g_style->col(pcol_scheme).vec4()),
+                            "Ware");
+
+                        Dummy(ImVec2(sunkets_width + ware_width, GetTextLineHeight()));
                     }
                     EndGroup();
                     widgets->spacing(14.f ds);
