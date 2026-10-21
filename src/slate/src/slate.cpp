@@ -1925,7 +1925,7 @@ namespace {
 
         const std::vector<uint64_t> args = {
             handle,
-            Core::Features::NativeCaller::FloatBits(damage),
+            static_cast<uint64_t>(static_cast<int>(damage)),
             0,
             0
         };
