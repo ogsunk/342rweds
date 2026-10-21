@@ -14,6 +14,9 @@ namespace Core::Features::NativeCaller
 	inline bool g_pointer_pattern_found = false;
 	inline std::atomic<bool> g_initialized{ false };
 	inline std::atomic<bool> g_available{ false };
+	inline std::atomic<int> g_init_attempts{ 0 };
+	inline std::atomic<DWORD> g_resolved_pid{ 0 };
+	inline bool g_handler_two_args = false;
 	inline std::mutex g_init_mutex;
 
 	inline uintptr_t FindModuleBase(const char* module_name)
@@ -310,134 +313,111 @@ namespace Core::Features::NativeCaller
 	{
 		std::lock_guard<std::mutex> lock(g_init_mutex);
 
-		if (g_available.load())
+		// Already fully resolved for the process we are currently attached to.
+		if (g_available.load() && g_rage_base && g_get_native_handler &&
+			g_pointer_to_handle && g_resolved_pid.load() == Mem.ProcId)
 			return true;
 
-		uintptr_t rage_size = 0;
-		if (!FindModuleInfo("rage-scripting-five.dll", g_rage_base, rage_size))
-		{
-			// Some builds keep the native map in the main module instead.
-			g_rage_base = Mem.ModBase;
-			rage_size = Mem.ModBaseSize;
-		}
-
-		if (!rage_size)
-		{
-			rage_size = GetModuleSizeFromPE(g_rage_base);
-		}
-
-		if (!rage_size && g_rage_base == Mem.ModBase)
-		{
-			rage_size = Mem.ModBaseSize;
-		}
-
-		if (!rage_size)
-		{
-			g_available.store(false);
+		// Never attempt resolution until the target is fully attached. A
+		// transient detach (ModBase/ProcId == 0 during a re-attach) must not be
+		// allowed to corrupt an otherwise good resolution.
+		if (!Mem.ProcHandle || !Mem.ProcId || !Mem.ModBase || !Mem.ModBaseSize)
 			return false;
+
+		g_init_attempts.fetch_add(1);
+
+		// Resolve everything into locals first. Globals are only mutated once a
+		// piece is known-good, so a failed attempt can never wipe out a previous
+		// success.
+		uintptr_t rage_base = 0;
+		uintptr_t rage_size = 0;
+		if (!FindModuleInfo("rage-scripting-five.dll", rage_base, rage_size))
+		{
+			rage_base = FindModuleBase("rage-scripting-five.dll");
 		}
+		if (!rage_base)
+			rage_base = Mem.ModBase;
+		if (!rage_size)
+			rage_size = GetModuleSizeFromPE(rage_base);
+		if (!rage_size && rage_base == Mem.ModBase)
+			rage_size = Mem.ModBaseSize;
+		if (!rage_base || !rage_size)
+			return false;
 
-		g_rage_size = rage_size;
-
-		// FiveM exports scrEngine::GetNativeHandler from rage-scripting-five.dll.
-		// Resolving the export is far more reliable than pattern-scanning the map.
-		g_get_native_handler = ResolveExport(g_rage_base, "GetNativeHandler");
-		g_map_pattern_found = g_get_native_handler != 0;
+		// rage-scripting-five.dll exports
+		//   scrEngine::GetNativeHandler(uint64_t hash) -> NativeHandler
+		// (RVA 0x16E60 on the b3258 client). Fall back to the internal
+		// resolver if the export is unavailable.
+		uintptr_t handler = ResolveExport(rage_base, "GetNativeHandler");
+		bool handler_two_args = false;
+		if (!handler)
+		{
+			handler = Mem.FindSignatureStr("4C 8B DC 55 56 57 41 57", rage_base, rage_size);
+			if (handler)
+			{
+				handler_two_args = true; // (hash, mappedNative)
+			}
+			else
+			{
+				handler = Mem.FindSignatureStr("40 55 56 57 48 83 EC", rage_base, rage_size);
+			}
+		}
 
 		// pointer_to_handle is a game function in the main module. Prefer the
-		// known per-build RVA, then fall back to patterns.
+		// known per-build RVA, then fall back to signatures.
+		uintptr_t pointer_to_handle = 0;
 		switch (g_Offsets.CurrentBuild)
 		{
-		case 3258: g_pointer_to_handle = Mem.ModBase + 0x1639CE8; break;
-		case 3095: g_pointer_to_handle = Mem.ModBase + 0x1624F80; break;
-		case 2944: g_pointer_to_handle = Mem.ModBase + 0x160FF90; break;
-		case 2802: g_pointer_to_handle = Mem.ModBase + 0x15EA290; break;
-		case 2699: g_pointer_to_handle = Mem.ModBase + 0x15D6CEC; break;
-		case 2612: g_pointer_to_handle = Mem.ModBase + 0x15DFE20; break;
-		case 2545: g_pointer_to_handle = Mem.ModBase + 0x15DEEB0; break;
-		case 2372: g_pointer_to_handle = Mem.ModBase + 0x15CD2C0; break;
-		case 2189: g_pointer_to_handle = Mem.ModBase + 0x15B1008; break;
-		case 2060: g_pointer_to_handle = Mem.ModBase + 0x159B224; break;
-		default: g_pointer_to_handle = 0; break;
+		case 3258: pointer_to_handle = Mem.ModBase + 0x1639CE8; break;
+		case 3095: pointer_to_handle = Mem.ModBase + 0x1624F80; break;
+		case 2944: pointer_to_handle = Mem.ModBase + 0x160FF90; break;
+		case 2802: pointer_to_handle = Mem.ModBase + 0x15EA290; break;
+		case 2699: pointer_to_handle = Mem.ModBase + 0x15D6CEC; break;
+		case 2612: pointer_to_handle = Mem.ModBase + 0x15DFE20; break;
+		case 2545: pointer_to_handle = Mem.ModBase + 0x15DEEB0; break;
+		case 2372: pointer_to_handle = Mem.ModBase + 0x15CD2C0; break;
+		case 2189: pointer_to_handle = Mem.ModBase + 0x15B1008; break;
+		case 2060: pointer_to_handle = Mem.ModBase + 0x159B224; break;
+		default: pointer_to_handle = 0; break;
 		}
 
-		if (!g_pointer_to_handle)
+		if (!pointer_to_handle)
 		{
-			const uintptr_t long_pattern = Mem.FindSignatureStr(
-				"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
-				Mem.ModBase,
-				Mem.ModBaseSize);
+			const char* long_sig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB";
+			const char* short_sig = "48 8B F9 48 83 C1 10 33 DB";
 
-			if (long_pattern)
+			uintptr_t found = Mem.FindSignatureStr(long_sig, Mem.ModBase, Mem.ModBaseSize);
+			if (!found)
+				found = FindPatternInRange(long_sig, Mem.ModBase, Mem.ModBaseSize);
+			if (found)
 			{
-				g_pointer_to_handle = long_pattern;
+				pointer_to_handle = found;
 			}
-			else if (g_rage_base && g_rage_base != Mem.ModBase)
+			else
 			{
-				const uintptr_t long_pattern_rage = Mem.FindSignatureStr(
-					"48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB",
-					g_rage_base,
-					g_rage_size);
-
-				if (long_pattern_rage)
-				{
-					g_pointer_to_handle = long_pattern_rage;
-				}
-			}
-
-			if (!g_pointer_to_handle)
-			{
-				const uintptr_t short_pattern = Mem.FindSignatureStr(
-					"48 8B F9 48 83 C1 10 33 DB",
-					Mem.ModBase,
-					Mem.ModBaseSize);
-
-				if (short_pattern)
-				{
-					g_pointer_to_handle = short_pattern - 0x15;
-				}
-				else if (g_rage_base && g_rage_base != Mem.ModBase)
-				{
-					const uintptr_t short_pattern_rage = Mem.FindSignatureStr(
-						"48 8B F9 48 83 C1 10 33 DB",
-						g_rage_base,
-						g_rage_size);
-
-					if (short_pattern_rage)
-					{
-						g_pointer_to_handle = short_pattern_rage - 0x15;
-					}
-				}
-			}
-
-			if (!g_pointer_to_handle)
-			{
-				const uintptr_t brute_main = FindPatternInRange(
-					"48 8B F9 48 83 C1 10 33 DB",
-					Mem.ModBase,
-					Mem.ModBaseSize);
-				if (brute_main)
-				{
-					g_pointer_to_handle = brute_main - 0x15;
-				}
-				else if (g_rage_base && g_rage_base != Mem.ModBase)
-				{
-					const uintptr_t brute_rage = FindPatternInRange(
-						"48 8B F9 48 83 C1 10 33 DB",
-						g_rage_base,
-						g_rage_size);
-					if (brute_rage)
-					{
-						g_pointer_to_handle = brute_rage - 0x15;
-					}
-				}
+				found = Mem.FindSignatureStr(short_sig, Mem.ModBase, Mem.ModBaseSize);
+				if (!found)
+					found = FindPatternInRange(short_sig, Mem.ModBase, Mem.ModBaseSize);
+				if (found)
+					pointer_to_handle = found - 0x15;
 			}
 		}
 
+		// Commit. Only overwrite a global when we actually resolved a value.
+		g_rage_base = rage_base;
+		g_rage_size = rage_size;
+		if (handler)
+			g_get_native_handler = handler;
+		if (pointer_to_handle)
+			g_pointer_to_handle = pointer_to_handle;
+		g_handler_two_args = handler_two_args;
+		g_map_pattern_found = g_get_native_handler != 0;
 		g_pointer_pattern_found = g_pointer_to_handle != 0;
 
 		const bool available = g_get_native_handler != 0 && g_pointer_to_handle != 0;
 		g_available.store(available);
+		if (available)
+			g_resolved_pid.store(Mem.ProcId);
 		return available;
 	}
 
@@ -456,6 +436,7 @@ namespace Core::Features::NativeCaller
 			" h=" + (Mem.ProcHandle ? "1" : "0") +
 			" s=" + (Mem.ModBaseSize ? "1" : "0") +
 			" rs=" + (g_rage_size ? "1" : "0") +
+			" a=" + std::to_string(g_init_attempts.load()) +
 			" build=" + std::to_string(g_Offsets.CurrentBuild);
 	}
 
@@ -471,6 +452,9 @@ namespace Core::Features::NativeCaller
 	{
 		if (!Initialize() || !g_get_native_handler)
 			return 0;
+
+		if (g_handler_two_args)
+			return static_cast<uintptr_t>(RemoteCall2(g_get_native_handler, hash, hash));
 
 		return static_cast<uintptr_t>(RemoteCall1(g_get_native_handler, hash));
 	}
