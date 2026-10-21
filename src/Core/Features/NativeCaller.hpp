@@ -18,8 +18,11 @@ namespace Core::Features::NativeCaller
 	{
 		HMODULE modules[1024]{};
 		DWORD needed = 0;
-		if (!EnumProcessModules(Mem.ProcHandle, modules, sizeof(modules), &needed))
-			return 0;
+		if (!EnumProcessModulesEx(Mem.ProcHandle, modules, sizeof(modules), &needed, LIST_MODULES_ALL))
+		{
+			if (!EnumProcessModules(Mem.ProcHandle, modules, sizeof(modules), &needed))
+				return 0;
+		}
 
 		const size_t count = needed / sizeof(HMODULE);
 		for (size_t i = 0; i < count; ++i)
@@ -29,6 +32,18 @@ namespace Core::Features::NativeCaller
 				_stricmp(name, module_name) == 0)
 			{
 				return reinterpret_cast<uintptr_t>(modules[i]);
+			}
+
+			char path[MAX_PATH]{};
+			if (GetModuleFileNameExA(Mem.ProcHandle, modules[i], path, sizeof(path)))
+			{
+				std::string full(path);
+				const size_t pos = full.find_last_of("\\/");
+				const std::string base = (pos == std::string::npos) ? full : full.substr(pos + 1);
+				if (_stricmp(base.c_str(), module_name) == 0)
+				{
+					return reinterpret_cast<uintptr_t>(modules[i]);
+				}
 			}
 		}
 
@@ -118,8 +133,8 @@ namespace Core::Features::NativeCaller
 	{
 		std::lock_guard<std::mutex> lock(g_init_mutex);
 
-		if (g_initialized.load())
-			return g_available.load();
+		if (g_available.load())
+			return true;
 
 		g_rage_base = FindModuleBase("rage-scripting-five.dll");
 		if (!g_rage_base)
@@ -187,9 +202,6 @@ namespace Core::Features::NativeCaller
 
 		const bool available = g_fast_path_map != 0 && g_pointer_to_handle != 0;
 		g_available.store(available);
-		if (available)
-			g_initialized.store(true);
-
 		return available;
 	}
 
