@@ -282,7 +282,8 @@ namespace Core::Features::NativeCaller
 			" m=" + (g_map_pattern_found ? "1" : "0") +
 			" p=" + (g_pointer_pattern_found ? "1" : "0") +
 			" b=" + (Mem.ModBase ? "1" : "0") +
-			" h=" + (Mem.ProcHandle ? "1" : "0");
+			" h=" + (Mem.ProcHandle ? "1" : "0") +
+			" build=" + std::to_string(g_Offsets.CurrentBuild);
 	}
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
