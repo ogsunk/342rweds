@@ -16,6 +16,8 @@ namespace Core::Features::NativeCaller
 	inline std::atomic<bool> g_available{ false };
 	inline std::atomic<int> g_init_attempts{ 0 };
 	inline std::atomic<DWORD> g_resolved_pid{ 0 };
+	inline std::atomic<int> g_stage{ 0 };
+	inline std::atomic<int> g_cached_build{ 0 };
 	inline bool g_handler_two_args = false;
 	inline std::mutex g_init_mutex;
 
@@ -317,29 +319,89 @@ namespace Core::Features::NativeCaller
 		return 0;
 	}
 
+	inline int CurrentBuild()
+	{
+		int build = g_Offsets.CurrentBuild;
+		if (build > 0)
+		{
+			g_cached_build.store(build);
+			return build;
+		}
+
+		// ClearOffsets() zeroes g_Offsets mid-session, so keep the last build we
+		// saw and fall back to parsing the attached process name.
+		build = g_cached_build.load();
+		if (build > 0)
+			return build;
+
+		const std::string& name = Mem.ProcName2;
+		const size_t marker = name.find("_b");
+		if (marker != std::string::npos)
+		{
+			size_t i = marker + 2;
+			int value = 0;
+			while (i < name.size() && name[i] >= '0' && name[i] <= '9')
+			{
+				value = value * 10 + (name[i] - '0');
+				++i;
+			}
+			if (value > 0)
+			{
+				g_cached_build.store(value);
+				return value;
+			}
+		}
+
+		return 0;
+	}
+
 	inline bool Initialize()
 	{
 		std::lock_guard<std::mutex> lock(g_init_mutex);
 
-		// Already fully resolved for the process we are currently attached to.
+		// Already fully resolved. A transient ProcId == 0 during a re-attach
+		// must not invalidate a good resolution.
 		if (g_available.load() && g_rage_base && g_get_native_handler &&
-			g_pointer_to_handle && g_resolved_pid.load() == Mem.ProcId)
+			g_pointer_to_handle && (Mem.ProcId == 0 || g_resolved_pid.load() == Mem.ProcId))
 			return true;
 
-		// Never attempt resolution until the target is fully attached. A
-		// transient detach (ModBase/ProcId == 0 during a re-attach) must not be
-		// allowed to corrupt an otherwise good resolution.
-		if (!Mem.ProcHandle || !Mem.ProcId || !Mem.ModBase || !Mem.ModBaseSize)
-			return false;
-
 		g_init_attempts.fetch_add(1);
+
+		// Recover a dropped attachment instead of failing forever. Throttled so
+		// the per-frame diagnostics call cannot hammer OpenProcess.
+		if (!Mem.ModBase && g_Variables.ProcIdFiveM)
+		{
+			static std::atomic<uint64_t> last_attach_attempt{ 0 };
+			const uint64_t now = GetTickCount64();
+			uint64_t previous = last_attach_attempt.load();
+			if (now - previous > 2000 && last_attach_attempt.compare_exchange_strong(previous, now))
+			{
+				Mem.AttachProces(g_Variables.ProcIdFiveM);
+			}
+		}
+
+		// The main module base is the only hard requirement.
+		if (!Mem.ModBase)
+		{
+			g_stage.store(1);
+			return false;
+		}
+
+		uintptr_t main_size = Mem.ModBaseSize;
+		if (!main_size)
+			main_size = GetModuleSizeFromPE(Mem.ModBase);
+		if (!main_size)
+		{
+			g_stage.store(1);
+			return false;
+		}
 
 		// Resolve everything into locals first. Globals are only mutated once a
 		// piece is known-good, so a failed attempt can never wipe out a previous
 		// success.
 		uintptr_t rage_base = 0;
 		uintptr_t rage_size = 0;
-		if (!FindModuleInfo("rage-scripting-five.dll", rage_base, rage_size))
+		if (Mem.ProcId && !FindModuleInfo("rage-scripting-five.dll", rage_base, rage_size))
 		{
 			rage_base = FindModuleBase("rage-scripting-five.dll");
 		}
@@ -348,16 +410,20 @@ namespace Core::Features::NativeCaller
 		if (!rage_size)
 			rage_size = GetModuleSizeFromPE(rage_base);
 		if (!rage_size && rage_base == Mem.ModBase)
-			rage_size = Mem.ModBaseSize;
+			rage_size = main_size;
 		if (!rage_base || !rage_size)
+		{
+			g_stage.store(2);
 			return false;
+		}
 
 		// rage-scripting-five.dll exports
 		//   scrEngine::GetNativeHandler(uint64_t hash) -> NativeHandler
-		// (RVA 0x16E60 on the b3258 client). Fall back to the internal
-		// resolver if the export is unavailable.
+		// (RVA 0x16E60 on the b3258 client). Fall back to the internal resolver.
 		uintptr_t handler = ResolveExport(rage_base, "GetNativeHandler");
 		bool handler_two_args = false;
+		if (!handler && rage_base != Mem.ModBase)
+			handler = ResolveExport(Mem.ModBase, "GetNativeHandler");
 		if (!handler)
 		{
 			handler = Mem.FindSignatureStr("4C 8B DC 55 56 57 41 57", rage_base, rage_size);
@@ -374,7 +440,7 @@ namespace Core::Features::NativeCaller
 		// pointer_to_handle is a game function in the main module. Prefer the
 		// known per-build RVA, then fall back to signatures.
 		uintptr_t pointer_to_handle = 0;
-		switch (g_Offsets.CurrentBuild)
+		switch (CurrentBuild())
 		{
 		case 3258: pointer_to_handle = Mem.ModBase + 0x1639CE8; break;
 		case 3095: pointer_to_handle = Mem.ModBase + 0x1624F80; break;
@@ -394,18 +460,18 @@ namespace Core::Features::NativeCaller
 			const char* long_sig = "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 15 ? ? ? ? 48 8B F9 48 83 C1 10 33 DB";
 			const char* short_sig = "48 8B F9 48 83 C1 10 33 DB";
 
-			uintptr_t found = Mem.FindSignatureStr(long_sig, Mem.ModBase, Mem.ModBaseSize);
+			uintptr_t found = Mem.FindSignatureStr(long_sig, Mem.ModBase, main_size);
 			if (!found)
-				found = FindPatternInRange(long_sig, Mem.ModBase, Mem.ModBaseSize);
+				found = FindPatternInRange(long_sig, Mem.ModBase, main_size);
 			if (found)
 			{
 				pointer_to_handle = found;
 			}
 			else
 			{
-				found = Mem.FindSignatureStr(short_sig, Mem.ModBase, Mem.ModBaseSize);
+				found = Mem.FindSignatureStr(short_sig, Mem.ModBase, main_size);
 				if (!found)
-					found = FindPatternInRange(short_sig, Mem.ModBase, Mem.ModBaseSize);
+					found = FindPatternInRange(short_sig, Mem.ModBase, main_size);
 				if (found)
 					pointer_to_handle = found - 0x15;
 			}
@@ -425,7 +491,14 @@ namespace Core::Features::NativeCaller
 		const bool available = g_get_native_handler != 0 && g_pointer_to_handle != 0;
 		g_available.store(available);
 		if (available)
+		{
 			g_resolved_pid.store(Mem.ProcId);
+			g_stage.store(0);
+		}
+		else
+		{
+			g_stage.store(g_get_native_handler ? 4 : 3);
+		}
 		return available;
 	}
 
@@ -444,8 +517,10 @@ namespace Core::Features::NativeCaller
 			" h=" + (Mem.ProcHandle ? "1" : "0") +
 			" s=" + (Mem.ModBaseSize ? "1" : "0") +
 			" rs=" + (g_rage_size ? "1" : "0") +
+			" st=" + std::to_string(g_stage.load()) +
 			" a=" + std::to_string(g_init_attempts.load()) +
-			" build=" + std::to_string(g_Offsets.CurrentBuild);
+			" pid=" + std::to_string(Mem.ProcId) +
+			" build=" + std::to_string(CurrentBuild());
 	}
 
 	inline uint32_t PointerToHandle(uintptr_t entity)
