@@ -1,6 +1,7 @@
 #include <slate.h>
 #include "../resources/fonts.h"
 #include "../resources/images.h"
+#include "../resources/sunketsware_logo.h"
 #include "../../Core/Config.hpp"
 #include "../../Core/Core.hpp"
 #include "cleaners/cleaners.h"
@@ -349,12 +350,12 @@ namespace {
         size_t size = 0;
     };
 
-    const seasonal_logo_binary_t logo_spring_binary{ logobinary, sizeof(logobinary) };
-    const seasonal_logo_binary_t logo_summer_binary{ logobinary, sizeof(logobinary) };
-    const seasonal_logo_binary_t logo_autumn_binary{ logobinary, sizeof(logobinary) };
-    const seasonal_logo_binary_t logo_winter_binary{ logobinary, sizeof(logobinary) };
-    const seasonal_logo_binary_t logo_christmas_binary{ logobinary, sizeof(logobinary) };
-    const seasonal_logo_binary_t logo_easter_binary{ logobinary, sizeof(logobinary) };
+    const seasonal_logo_binary_t logo_spring_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
+    const seasonal_logo_binary_t logo_summer_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
+    const seasonal_logo_binary_t logo_autumn_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
+    const seasonal_logo_binary_t logo_winter_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
+    const seasonal_logo_binary_t logo_christmas_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
+    const seasonal_logo_binary_t logo_easter_binary{ sunketsware_logo_binary, sizeof(sunketsware_logo_binary) };
 
     c_image& get_menu_logo_texture(const menu_season_t season) {
         switch (season) {
@@ -1026,13 +1027,24 @@ namespace {
             auth::AccountProfile fetched_profile{};
             std::string raw;
             const bool ok = auth::LoadCurrentAccountProfile(fetched_profile, &raw);
-            if (ok && !fetched_profile.discord_id.empty()) {
+            if (ok) {
                 std::string discord_raw;
-                auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
-
                 auth::discord_ipc_identity discord_identity{};
-                if (auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw)) {
+                const bool local_discord_ok = auth::FetchDiscordIdentityFromLocalClient(&discord_identity, &discord_raw);
+
+                if (local_discord_ok) {
+                    if (fetched_profile.discord_id.empty()) {
+                        fetched_profile.discord_id = discord_identity.id;
+                    }
                     fetched_profile.discord_username = discord_identity.username;
+                    if (fetched_profile.discord_display_name.empty()) {
+                        fetched_profile.discord_display_name = discord_identity.username;
+                    }
+                }
+
+                // Resolve the avatar/display profile over HTTP using the Discord ID.
+                if (!fetched_profile.discord_id.empty()) {
+                    auth::PopulateDiscordProfile(fetched_profile, &discord_raw);
                 }
             }
 
@@ -1131,8 +1143,14 @@ namespace {
         instance->avatar.reset();
         try {
             instance->avatar.load(device, avatar_url);
+            const bool loaded = static_cast<bool>(static_cast<ImTextureID>(instance->avatar));
             std::lock_guard<std::mutex> lock(account_sidebar_state.mutex);
-            account_sidebar_state.avatar_loaded_url = avatar_url;
+            if (loaded) {
+                account_sidebar_state.avatar_loaded_url = avatar_url;
+            }
+            else {
+                account_sidebar_state.avatar_attempted_url.clear();
+            }
         }
         catch (...) {
         }
@@ -1360,11 +1378,16 @@ namespace {
             const bool has_resolved_name = !is_placeholder_player_name(sanitized_name);
 
             return !entity.Ped ||
-                entity.Ped == Core::SDK::Pointers::pLocalPlayer ||
                 (entity.Id <= 0 && !has_resolved_name);
             }), players.end());
 
         std::stable_sort(players.begin(), players.end(), [](const Core::SDK::Game::EntityStruct& lhs, const Core::SDK::Game::EntityStruct& rhs) {
+            const bool lhs_is_local = lhs.Ped == Core::SDK::Pointers::pLocalPlayer;
+            const bool rhs_is_local = rhs.Ped == Core::SDK::Pointers::pLocalPlayer;
+            if (lhs_is_local != rhs_is_local) {
+                return lhs_is_local;
+            }
+
             const std::string lhs_name = get_player_display_name(lhs);
             const std::string rhs_name = get_player_display_name(rhs);
             const bool lhs_has_real_name = lhs_name.rfind("Player #", 0) != 0;
@@ -1487,7 +1510,7 @@ namespace {
 
         const char* list_title = friends_only ? "Friends" : "Players";
         const char* search_hint = friends_only ? "Search friends..." : "Search players...";
-        const char* empty_title = friends_only ? "No friends are currently tracked." : "No remote players are currently tracked.";
+        const char* empty_title = friends_only ? "No friends are currently tracked." : "No players are currently tracked.";
         const char* no_match_title = friends_only ? "No friends match your search." : "No players match your search.";
 
         BeginGroup();
@@ -4824,7 +4847,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         BeginGroup();
         {
-            widgets->child.begin(I_CAR, "Vehicles", 1, { 318 ds, 414 ds });
+            widgets->child.begin(I_CAR, "Vehicles", 1, { 270 ds, 414 ds });
             {
                 widgets->textinput("##vehicle_directory_search", vehicle_search, sizeof(vehicle_search), { .icon = I_SEARCH, .hint = "Search vehicles..." });
                 widgets->spacing(6 ds);
@@ -4880,7 +4903,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         BeginGroup();
         {
-            widgets->child.begin("", "Selected Vehicle", 2, { 186 ds, 414 ds });
+            widgets->child.begin("", "Selected Vehicle", 2, { 234 ds, 414 ds });
             {
                 if (!has_selected_vehicle) {
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 10 ds, 10 ds });
@@ -5001,9 +5024,16 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         auto* local_player = Core::SDK::Pointers::pLocalPlayer;
         int fake_lag_key_mode = g_Config.Player->FakeLagMode == 1 ? 1 : 0;
 
+        const float misc_content_width = GetContentRegionAvail().x;
+        const float misc_column_gap = 8.f ds;
+        const float misc_column_width = (misc_content_width - misc_column_gap) * 0.5f;
+        const float misc_row_y = GetCursorPosY();
+
+        // Draw Quick Actions on the right while keeping Self options on the left.
+        SetCursorPosX(misc_column_width + misc_column_gap);
         BeginGroup();
         {
-            widgets->child.begin(I_USER__COG, "Quick Actions", 1, { 0, 312 ds });
+            widgets->child.begin(I_USER__COG, "Quick Actions", 1, { misc_column_width, 312 ds });
             {
                 if (!local_player) {
                     draw_player_empty_state(I_USER__COG, "No Local Player", "Wait until the local player is available.");
@@ -5045,11 +5075,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         }
         EndGroup();
 
-        SameLine(0, 8.f ds);
+        SetCursorPos({ 0, misc_row_y });
 
         BeginGroup();
         {
-            widgets->child.begin(I_WAVE__SAW__TOOL, "Self options", 2, { 0, 312 ds });
+            widgets->child.begin(I_WAVE__SAW__TOOL, "Self options", 2, { misc_column_width, 312 ds });
             {
                 if (!local_player) {
                     draw_player_empty_state(I_USER__COG, "No Local Player", "Wait until the local player is available.");
@@ -5204,15 +5234,13 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         const bool has_vehicle = current_vehicle != nullptr;
         sync_local_vehicle_tuning_state(current_vehicle);
         auto& tuning = g_local_vehicle_tuning_state;
-        const bool has_gravity_offset = g_Offsets.m_VehicleGravity != 0;
-
         if (has_vehicle && current_vehicle->GetGodMode() != g_Config.Player->VehicleGodMode) {
             current_vehicle->SetGodMode(g_Config.Player->VehicleGodMode);
         }
 
         BeginGroup();
         {
-            widgets->child.begin(I_CAR, "Current Vehicle", 1, { 0, 312 ds });
+            widgets->child.begin(I_CAR, "Current Vehicle", 1, { 250 ds, 312 ds });
             {
                 if (!has_vehicle) {
                     draw_player_empty_state(I_CAR, "No Vehicle", "Enter a vehicle to use current vehicle tools.");
@@ -5256,44 +5284,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (widgets->checkbox(I_SPARKLES, "Horn Boost", &horn_boost)) {
                         g_Config.Player->HornetBoost = horn_boost;
                     }
-                    if (widgets->sliderfloat(
-                        I_GRADIENTER,
-                        has_gravity_offset ? "Gravity" : "Gravity / Downforce",
-                        &tuning.gravity,
-                        has_gravity_offset ? -20.0f : 0.0f,
-                        has_gravity_offset ? 20.0f : 50.0f,
-                        "%.2f")) {
-                        if (!set_local_vehicle_gravity(current_vehicle, tuning.gravity)) {
-                            NotifyManager::Send("Enter a vehicle first", 220.0f);
-                        }
-                    }
-
                     if (widgets->sliderfloat(I_VECTOR__SPLINE, "Acceleration", &tuning.acceleration, 0.0f, 400.0f, "%.2f")) {
                         if (!write_local_vehicle_handling_value(current_vehicle, offsetof(CHandlingData, m_acceleration), tuning.acceleration)) {
-                            NotifyManager::Send("Enter a vehicle first", 220.0f);
-                        }
-                    }
-
-                    if (widgets->sliderfloat(I_SPARKLES, "Drive Force", &tuning.drive_force, 0.0f, 100.0f, "%.2f")) {
-                        if (!write_local_vehicle_handling_value(current_vehicle, offsetof(CHandlingData, m_initial_drive_force), tuning.drive_force)) {
-                            NotifyManager::Send("Enter a vehicle first", 220.0f);
-                        }
-                    }
-
-                    if (widgets->sliderfloat(I_DOTS, "Grip", &tuning.grip, 0.0f, 100.0f, "%.2f")) {
-                        if (!write_local_vehicle_handling_value(current_vehicle, offsetof(CHandlingData, m_traction_curve_min), tuning.grip)) {
-                            NotifyManager::Send("Enter a vehicle first", 220.0f);
-                        }
-                    }
-
-                    if (widgets->sliderfloat(I_COMMAND, "Brake Force", &tuning.m_brake_force, 0.0f, 100.0f, "%.2f")) {
-                        if (!write_local_vehicle_handling_value(current_vehicle, offsetof(CHandlingData, m_brake_force), tuning.m_brake_force)) {
-                            NotifyManager::Send("Enter a vehicle first", 220.0f);
-                        }
-                    }
-
-                    if (widgets->sliderfloat(I_GRADIENTER, "Suspension Force", &tuning.suspension_force, 0.0f, 100.0f, "%.2f")) {
-                        if (!write_local_vehicle_handling_value(current_vehicle, offsetof(CHandlingData, m_suspension_force), tuning.suspension_force)) {
                             NotifyManager::Send("Enter a vehicle first", 220.0f);
                         }
                     }
@@ -5307,7 +5299,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         BeginGroup();
         {
-            widgets->child.begin(I_WAVE__SAW__TOOL, "Vehicle Actions", 2, { 0, 312 ds });
+            widgets->child.begin(I_WAVE__SAW__TOOL, "Vehicle Actions", 2, { 250 ds, 312 ds });
             {
                 if (!has_vehicle) {
                     draw_player_empty_state(I_CAR, "No Vehicle", "Enter a vehicle to unlock vehicle actions.");
