@@ -6223,17 +6223,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (!g_Config.General->NativeFeatures) {
                         NotifyManager::Send("Enable Experimental Natives first", 300.0f);
                     }
-                    else if (!Core::Features::NativeCaller::IsAvailable()) {
-                        NotifyManager::Send("Native caller unavailable", 300.0f);
-                    }
                     else {
-                        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(
-                            reinterpret_cast<uintptr_t>(Core::SDK::Pointers::pLocalPlayer));
-                        const uintptr_t handler = Core::Features::NativeCaller::GetNativeHandler(0xAE99FB955581844Aull);
-                        const std::string status =
-                            Core::Features::NativeCaller::Diagnostics() +
-                            " | handle=" + (handle ? "yes" : "no") +
-                            " | handler=" + (handler ? "yes" : "no");
+                        const std::string status = Core::Features::NativeCaller::Diagnostics();
                         NotifyManager::Send(status.c_str(), 600.0f);
                     }
                 }
