@@ -668,13 +668,14 @@ void Core::Features::cEsp::DrawRadar()
 	if (!cfg)
 		return;
 
-	ImDrawList* draw = ImGui::GetForegroundDrawList();
+	ImDrawList* draw = ImGui::GetBackgroundDrawList();
 
 	// Diagnostic readout (remove once verified).
 	const auto& snapshot = Core::SDK::Game::GetEntityListSnapshotCached();
 	{
 		static int debug_frames = 0;
-		if (++debug_frames % 120 == 0)
+		++debug_frames;
+		if (debug_frames == 1 || debug_frames % 60 == 0)
 		{
 			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\radar_debug.txt", std::ios::app);
 			log << "esp=" << (cfg->Enabled ? 1 : 0)
@@ -803,7 +804,7 @@ void Core::Features::cEsp::DrawMiscEffects()
 	if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
 		return;
 
-	ImDrawList* draw = ImGui::GetForegroundDrawList();
+	ImDrawList* draw = ImGui::GetBackgroundDrawList();
 	const ImVec2 aim{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowCenter.y };
 
 	if (cfg->BulletTracerEnabled)

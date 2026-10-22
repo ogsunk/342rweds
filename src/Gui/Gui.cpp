@@ -264,12 +264,17 @@ void Gui::ApplyStreamProofAffinity(bool enable) {
 void Gui::Rendering()
 {
 	{
-		static bool logged_gui = false;
-		if (!logged_gui)
+		static int gui_frames = 0;
+		++gui_frames;
+		if (gui_frames == 1 || gui_frames % 60 == 0)
 		{
-			logged_gui = true;
-			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\gui_debug.txt");
-			log << "gui rendering reached\n";
+			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\gui_debug.txt", std::ios::app);
+			log << "frame=" << gui_frames
+				<< " esp_ptr=" << (g_Config.ESP ? 1 : 0)
+				<< " radar=" << (g_Config.ESP && g_Config.ESP->RadarEnabled ? 1 : 0)
+				<< " tracer=" << (g_Config.ESP && g_Config.ESP->BulletTracerEnabled ? 1 : 0)
+				<< " alpha=" << ImGui::GetStyle().Alpha
+				<< "\n";
 		}
 	}
 
