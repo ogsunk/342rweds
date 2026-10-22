@@ -539,11 +539,12 @@ namespace
 		draw->AddLine(ImVec2(center.x, min.y), ImVec2(center.x, max.y), IM_COL32(255, 255, 255, 35), 1.0f);
 		draw->AddLine(ImVec2(min.x, center.y), ImVec2(max.x, center.y), IM_COL32(255, 255, 255, 35), 1.0f);
 
+		ImFont* font = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
+		draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 5.0f), IM_COL32(205, 50, 65, accent_alpha), "RADAR");
+
 		const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
 		const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 5.0f);
 		const float scale = (std::min(width, height) * 0.5f / range) * zoom;
-
-		ImFont* font = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
 
 		const auto entities = Core::SDK::Game::GetEntityListSnapshot();
 		for (const auto& entity : entities)
