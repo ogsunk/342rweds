@@ -6583,9 +6583,16 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
     widgets->nav.addpage(4, [&] {
         auto* local_player = Core::SDK::Pointers::pLocalPlayer;
 
+        const float weapon_content_width = GetContentRegionAvail().x;
+        const float weapon_column_gap = 8.f ds;
+        const float weapon_column_width = (weapon_content_width - weapon_column_gap) * 0.5f;
+        const float weapon_row_y = GetCursorPosY();
+
+        // Weapon Controls on the right, Weapon Spawner on the left.
+        SetCursorPosX(weapon_column_width + weapon_column_gap);
         BeginGroup();
         {
-            widgets->child.begin(I_SWORD, "Weapon Controls", 1, { 0, 312 ds });
+            widgets->child.begin(I_SWORD, "Weapon Controls", 1, { weapon_column_width, 312 ds });
             {
                 if (!local_player) {
                     draw_player_empty_state(I_USER__COG, "No Local Player", "Wait until the local player is available.");
@@ -6688,9 +6695,10 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         }
         EndGroup();
 
+        SetCursorPos({ 0, weapon_row_y });
         BeginGroup();
         {
-            widgets->child.begin(I_SWORD, "Weapon Spawner", 1, { 0, 240 ds });
+            widgets->child.begin(I_SWORD, "Weapon Spawner", 2, { weapon_column_width, 312 ds });
             {
                 struct WeaponEntry { const char* name; uint32_t hash; };
                 struct WeaponCategory { const char* name; std::vector<WeaponEntry> weapons; };
