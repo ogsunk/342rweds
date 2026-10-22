@@ -511,12 +511,164 @@ void Core::Features::cEsp::DrawSelectionIndicators()
 	}
 }
 
+namespace
+{
+	void draw_radar_overlay()
+	{
+		auto* cfg = g_Config.ESP;
+		if (!cfg || !cfg->RadarEnabled)
+			return;
+
+		auto* local = Core::SDK::Pointers::pLocalPlayer;
+		if (!local)
+			return;
+
+		const D3DXVECTOR3 origin = local->GetPos();
+		const float width = std::clamp(cfg->RadarWidth, 100.0f, 600.0f);
+		const float height = std::clamp(cfg->RadarHeight, 100.0f, 600.0f);
+		const ImVec2 center{ 40.0f + width * 0.5f, 220.0f + height * 0.5f };
+		const ImVec2 min{ center.x - width * 0.5f, center.y - height * 0.5f };
+		const ImVec2 max{ center.x + width * 0.5f, center.y + height * 0.5f };
+		const float transparency = std::clamp(cfg->RadarTransparency, 0.0f, 1.0f);
+		const int bg_alpha = static_cast<int>(transparency * 220.0f);
+		const int accent_alpha = static_cast<int>(transparency * 255.0f);
+
+		ImDrawList* draw = ImGui::GetBackgroundDrawList();
+		draw->AddRectFilled(min, max, IM_COL32(8, 8, 10, bg_alpha), 8.0f);
+		draw->AddRect(min, max, IM_COL32(205, 50, 65, accent_alpha), 8.0f, 0, 1.5f);
+		draw->AddLine(ImVec2(center.x, min.y), ImVec2(center.x, max.y), IM_COL32(255, 255, 255, 35), 1.0f);
+		draw->AddLine(ImVec2(min.x, center.y), ImVec2(max.x, center.y), IM_COL32(255, 255, 255, 35), 1.0f);
+
+		const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
+		const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 5.0f);
+		const float scale = (std::min(width, height) * 0.5f / range) * zoom;
+
+		ImFont* font = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
+
+		const auto entities = Core::SDK::Game::GetEntityListSnapshot();
+		for (const auto& entity : entities)
+		{
+			if (!entity.Ped || entity.Ped == local)
+				continue;
+
+			const bool dead = entity.Health <= 0.0f;
+			if (dead && !cfg->RadarShowDead)
+				continue;
+
+			if (entity.IsFriend)
+			{
+				if (!cfg->RadarShowFriends)
+					continue;
+			}
+			else if (entity.IsPlayer)
+			{
+				if (!cfg->RadarShowPlayers)
+					continue;
+			}
+			else
+			{
+				if (!cfg->RadarShowNPCs)
+					continue;
+			}
+
+			const float dx = entity.Pos.x - origin.x;
+			const float dy = entity.Pos.y - origin.y;
+			const float dist = std::sqrt(dx * dx + dy * dy);
+			if (dist > range)
+				continue;
+
+			const ImVec2 dot{ center.x + dx * scale, center.y - dy * scale };
+			if (dot.x < min.x || dot.x > max.x || dot.y < min.y || dot.y > max.y)
+				continue;
+
+			const ImColor dot_color = entity.IsFriend ? cfg->RadarFriendCol
+				: (entity.IsPlayer ? cfg->RadarPlayerCol : cfg->RadarNpcCol);
+			draw->AddCircleFilled(dot, 3.0f, dot_color, 10);
+			draw->AddCircle(dot, 3.0f, IM_COL32(0, 0, 0, 140), 10, 1.0f);
+
+			if (cfg->RadarShowNames || cfg->RadarShowDistances)
+			{
+				std::string label;
+				if (cfg->RadarShowNames)
+					label = entity.NetworkInfo.UserName;
+				if (cfg->RadarShowDistances)
+				{
+					if (!label.empty())
+						label += " ";
+					label += std::to_string(static_cast<int>(dist)) + "m";
+				}
+				if (!label.empty() && font)
+					draw->AddText(font, 10.0f, ImVec2(dot.x + 5.0f, dot.y - 5.0f), IM_COL32(255, 255, 255, 210), label.c_str());
+			}
+		}
+	}
+
+	void draw_misc_effects()
+	{
+		auto* cfg = g_Config.ESP;
+		if (!cfg)
+			return;
+		if (!cfg->BulletTracerEnabled && !cfg->ImpactMarker && !cfg->GlowEffect && !cfg->Particles)
+			return;
+
+		auto* local = Core::SDK::Pointers::pLocalPlayer;
+		if (!local || (GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+			return;
+
+		ImDrawList* draw = ImGui::GetBackgroundDrawList();
+		const ImVec2 aim{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowCenter.y };
+
+		if (cfg->BulletTracerEnabled)
+		{
+			const D3DXVECTOR3 muzzle = local->GetBonePosDefault(SKEL_R_Hand);
+			const D3DXVECTOR2 screen = Core::SDK::Game::WorldToScreen(muzzle);
+			const ImVec2 from = Core::SDK::Game::IsOnScreen(screen)
+				? ImVec2(screen.x, screen.y)
+				: ImVec2(g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y);
+			draw->AddLine(from, aim, cfg->BulletTracerCol, 1.5f);
+		}
+
+		if (cfg->ImpactMarker)
+		{
+			draw->AddCircle(aim, 9.0f, cfg->ImpactMarkerCol, 14, 1.5f);
+			draw->AddLine(ImVec2(aim.x - 12.0f, aim.y), ImVec2(aim.x + 12.0f, aim.y), cfg->ImpactMarkerCol, 1.5f);
+			draw->AddLine(ImVec2(aim.x, aim.y - 12.0f), ImVec2(aim.x, aim.y + 12.0f), cfg->ImpactMarkerCol, 1.5f);
+		}
+
+		if (cfg->GlowEffect)
+		{
+			for (int i = 8; i >= 1; --i)
+			{
+				ImVec4 glow = cfg->GlowEffectCol.Value;
+				glow.w *= 0.06f;
+				draw->AddCircleFilled(aim, 4.0f + static_cast<float>(i) * 3.0f, ImGui::GetColorU32(glow), 24);
+			}
+		}
+
+		if (cfg->Particles)
+		{
+			static float phase = 0.0f;
+			phase += ImGui::GetIO().DeltaTime;
+			for (int i = 0; i < 10; ++i)
+			{
+				const float angle = phase * 3.0f + static_cast<float>(i) * 0.628f;
+				const float radius = 8.0f + std::fmod(phase * 45.0f + static_cast<float>(i) * 7.0f, 34.0f);
+				const ImVec2 p{ aim.x + std::cos(angle) * radius, aim.y + std::sin(angle) * radius };
+				draw->AddCircleFilled(p, 1.8f, cfg->ParticlesCol, 8);
+			}
+		}
+	}
+}
+
 void Core::Features::cEsp::Draw()
 {
 	auto Cfg = g_Config.ESP;
 
 	if (!Cfg->Enabled)
 		return;
+
+	draw_radar_overlay();
+	draw_misc_effects();
 
 	static std::unordered_map<CPed*, Core::SDK::Game::EspAnim> vEspAnimations;
 	const auto ApplyAlpha = [](ImColor color, float alphaScale) -> ImColor
