@@ -1921,28 +1921,6 @@ namespace {
         NotifyManager::Send("Player knocked down", 220.0f);
     }
 
-    bool native_ragdoll_player(const Core::SDK::Game::EntityStruct& entity) {
-        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
-            return false;
-        }
-
-        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(entity.Ped));
-        if (!handle) {
-            return false;
-        }
-
-        const std::vector<uint64_t> args = {
-            handle,
-            3000,
-            10000,
-            0,
-            0,
-            0,
-            0
-        };
-        return Core::Features::NativeCaller::InvokeNative(0xAE99FB955581844Aull, args);
-    }
-
     bool native_burn_player(const Core::SDK::Game::EntityStruct& entity) {
         if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
@@ -2106,36 +2084,6 @@ namespace {
         return Core::Features::NativeCaller::InvokeNative(0x2D05CED3A38D0F3Aull, { handle, 0 });
     }
 
-    bool native_shoot_at_entity(uintptr_t shooter, uintptr_t target) {
-        if (!shooter || !target || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
-            return false;
-        }
-
-        const uint32_t shooter_handle = Core::Features::NativeCaller::PointerToHandle(shooter);
-        if (!shooter_handle) {
-            return false;
-        }
-
-        const D3DXVECTOR3 from = reinterpret_cast<CPed*>(shooter)->GetPos();
-        const D3DXVECTOR3 to = reinterpret_cast<CPed*>(target)->GetPos();
-
-        const std::vector<uint64_t> args = {
-            Core::Features::NativeCaller::FloatBits(from.x),
-            Core::Features::NativeCaller::FloatBits(from.y),
-            Core::Features::NativeCaller::FloatBits(from.z + 0.5f),
-            Core::Features::NativeCaller::FloatBits(to.x),
-            Core::Features::NativeCaller::FloatBits(to.y),
-            Core::Features::NativeCaller::FloatBits(to.z + 0.5f),
-            100,                              // damage
-            1,                                // p7 (force)
-            0x1B06D571,                       // WEAPON_PISTOL
-            shooter_handle,                   // owner
-            1, 0,                             // audible, invisible
-            Core::Features::NativeCaller::FloatBits(250.0f)
-        };
-        return Core::Features::NativeCaller::InvokeNative(0x867654CBC7606F2Cull, args);
-    }
-
     void bring_player_to_me(const Core::SDK::Game::EntityStruct& entity) {
         if (!entity.Ped) {
             NotifyManager::Send("Player unavailable", 220.0f);
@@ -2189,38 +2137,6 @@ namespace {
             return;
         }
         NotifyManager::Send("Player attached to you", 220.0f);
-    }
-
-    void shoot_player(const Core::SDK::Game::EntityStruct& entity) {
-        if (!entity.Ped) {
-            NotifyManager::Send("Player unavailable", 220.0f);
-            return;
-        }
-
-        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
-        if (!local_player) {
-            NotifyManager::Send("Local player unavailable", 220.0f);
-            return;
-        }
-
-        if (!native_shoot_at_entity(reinterpret_cast<uintptr_t>(local_player), reinterpret_cast<uintptr_t>(entity.Ped))) {
-            NotifyManager::Send("Shoot native unavailable", 220.0f);
-            return;
-        }
-        NotifyManager::Send("Shot at player", 220.0f);
-    }
-
-    void native_armor_player(const Core::SDK::Game::EntityStruct& entity, int amount) {
-        if (!entity.Ped) {
-            NotifyManager::Send("Player unavailable", 220.0f);
-            return;
-        }
-
-        if (!native_set_ped_armour(reinterpret_cast<uintptr_t>(entity.Ped), amount)) {
-            NotifyManager::Send("Armor native unavailable", 220.0f);
-            return;
-        }
-        NotifyManager::Send("Armor given (native)", 220.0f);
     }
 
     // ---- Vehicle natives -------------------------------------------------
@@ -2295,19 +2211,6 @@ namespace {
         return ok;
     }
 
-    bool native_set_vehicle_undriveable(uintptr_t vehicle, bool toggle) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
-            return false;
-        }
-
-        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
-        if (!handle) {
-            return false;
-        }
-
-        return Core::Features::NativeCaller::InvokeNative(0x8ABA6AF54B942B95ull, { handle, toggle ? 1ull : 0ull });
-    }
-
     bool native_set_vehicle_engine_on(uintptr_t vehicle, bool on) {
         if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
@@ -2379,6 +2282,37 @@ namespace {
             return;
         }
         NotifyManager::Send(now_disabled ? "Engine disabled" : "Engine enabled", 220.0f);
+    }
+
+    // Door ids: 0 front-left, 1 front-right, 2 rear-left, 3 rear-right, 4 hood, 5 trunk.
+    bool native_break_vehicle_door(uintptr_t vehicle, int door_index) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        return Core::Features::NativeCaller::InvokeNative(0xD4D4F6A4AB575A33ull, { handle, static_cast<uint64_t>(door_index), 1ull });
+    }
+
+    bool native_break_all_vehicle_doors(uintptr_t vehicle) {
+        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(vehicle);
+        if (!handle) {
+            return false;
+        }
+
+        bool ok = true;
+        for (int door = 0; door < 6; ++door) {
+            ok = Core::Features::NativeCaller::InvokeNative(0xD4D4F6A4AB575A33ull, { handle, static_cast<uint64_t>(door), 1ull }) && ok;
+        }
+        return ok;
     }
 
     // Eject the occupant of a seat. seatIndex -1 is the driver, 0+ are passengers.
@@ -6249,6 +6183,17 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                                 NotifyManager::Send("Alarm unavailable", 220.0f);
                             }
                             });
+                        action_button("Break All", "Break Every Door Off", [&] {
+                            if (!native_break_all_vehicle_doors(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer))) {
+                                NotifyManager::Send("Break doors unavailable", 220.0f);
+                            }
+                            });
+                        action_button("Door FL", "Break Front Left Door", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 0); });
+                        action_button("Door FR", "Break Front Right Door", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 1); });
+                        action_button("Door RL", "Break Rear Left Door", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 2); });
+                        action_button("Door RR", "Break Rear Right Door", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 3); });
+                        action_button("Hood", "Break Hood Off", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 4); });
+                        action_button("Trunk", "Break Trunk Off", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 5); });
                         action_button("Name", "Copy Vehicle Name", [&] { copy_player_value_to_clipboard(get_vehicle_display_name(selected_vehicle), "Vehicle name copied", "Vehicle name unavailable"); });
                         action_button("Driver", "Copy Driver Name", [&] { copy_player_value_to_clipboard(get_vehicle_driver_name(selected_vehicle), "Driver name copied", "Driver name unavailable"); });
                         action_button("Coords", "Copy Vehicle Coordinates", [&] {
