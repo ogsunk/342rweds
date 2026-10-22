@@ -67,13 +67,13 @@ namespace Core {
 			inline static bool StreamProof = true;
 			inline static bool NativeFeatures = false;
 			inline static bool SafeMode = false;
-			inline static bool Notifications;
+			inline static bool Notifications = true;
 			inline static bool VisibleCheckMode;
 			inline static bool Destruct;
-			inline static bool WaterMark;
+			inline static bool WaterMark = true;
 			inline static bool AutoConfig;
 			inline static bool SaveFriendList;
-			inline static bool KeybindList;
+			inline static bool KeybindList = true;
 			inline static bool Crosshair;
 			inline static int CrosshairStyle = 0;
 			inline static float CrosshairSize = 1.5f;
@@ -176,7 +176,7 @@ namespace Core {
 			inline static bool IgnoreNPCs;
 			inline static bool ExcludeGod;
 			inline static bool IgnoreDead;
-			inline static bool SmartTrigger = true;
+			inline static bool SmartTrigger = false;
 			inline static bool RespectMaxRange;
 			inline static bool BoneGroup_Head;
 			inline static bool BoneGroup_Neck;
@@ -323,7 +323,7 @@ namespace Core {
 			inline static ImColor TargetCol{ 255, 0, 0, 200 };
 			inline static ImColor TargetColor{ 0, 0, 0, 255 };
 			inline static ImColor BoxCol{ 255, 255, 255, 200 };
-			inline static ImColor FilledBoxCol{ 0, 0, 0, 40 };
+			inline static ImColor FilledBoxCol{ 255, 255, 255, 40 };
 			inline static ImColor SnapLinesCol{ 255, 255, 255, 200 };
 			inline static ImColor FriendCol{ 255, 204, 0, 255 };
 			inline static ImColor InVisibleCol{ 255, 0, 0, 255 };

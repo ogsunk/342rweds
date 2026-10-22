@@ -2716,15 +2716,6 @@ namespace {
                             }
                             });
                         action_button("Friend", "Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
-                        action_button("Name", "Copy Name", [&] { copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable"); });
-                        action_button("Discord", "Copy Discord ID", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.DiscordId, "Discord ID copied", "Discord ID unavailable"); });
-                        action_button("Steam", "Copy Steam ID", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.SteamId, "Steam ID copied", "Steam ID unavailable"); });
-                        action_button("Coords", "Copy Coordinates", [&] {
-                            char coordinates[64]{};
-                            const D3DXVECTOR3 position = selected_player.Ped ? selected_player.Ped->GetPos() : D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-                            std::snprintf(coordinates, sizeof(coordinates), "%.1f, %.1f, %.1f", position.x, position.y, position.z);
-                            copy_player_value_to_clipboard(coordinates, "Coordinates copied", "Coordinates unavailable");
-                            });
 
                         PopStyleColor(3);
                         PopStyleVar();
@@ -5790,9 +5781,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_USER__COG, "Ignore NPCs", &g_Config.ESP->IgnoreNPCs);
                 widgets->checkbox(I_PAW, "Ignore Animals", &g_Config.ESP->IgnoreAnimals);
                 widgets->checkbox(I_EYE, "Highlight Visible", &g_Config.ESP->HighlightVisible);
-                if (g_Config.ESP->HighlightVisible) {
-                    widgets->checkbox(I_USER__OFF, "Ignore Local Body", &g_Config.ESP->IgnoreLocalPed);
-                }
                 widgets->checkbox(I_EYE, "Friend Marker", &g_Config.ESP->FriendsMarker);
                 if (g_Config.ESP->FriendsMarker) {
                     widgets->binder(I_COMMAND, "Friend Marker Key", &g_Config.ESP->FriendsMarkerBind);
@@ -5822,10 +5810,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->selector("Health Position", &g_Config.ESP->HealthBarState, { "Top", "Right", "Bottom", "Left" });
                 }
                 widgets->checkbox(I_SHIELD, "Armor Bar", &g_Config.ESP->ArmorBar);
-                if (g_Config.ESP->ArmorBar) {
-                    widgets->checkbox(I_GRADIENTER, "Armor Gradient", &g_Config.ESP->ArmorBarGradient);
-                    widgets->selector("Armor Position", &g_Config.ESP->ArmorBarState, { "Top", "Right", "Bottom", "Left" });
-                }
                 widgets->checkbox(I_EYE__COG, "Snaplines", &g_Config.ESP->SnapLines);
             }
             widgets->child.end();
@@ -5862,10 +5846,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 if (g_Config.ESP->HealthBarGradient) {
                     widgets->coloredit(I_HEART, "Health Gradient 1", esp_health_gradient_start);
                     widgets->coloredit(I_HEART, "Health Gradient 2", esp_health_gradient_end);
-                }
-                if (g_Config.ESP->ArmorBarGradient) {
-                    widgets->coloredit(I_SHIELD, "Armor Gradient 1", esp_armor_gradient_start);
-                    widgets->coloredit(I_SHIELD, "Armor Gradient 2", esp_armor_gradient_end);
                 }
             }
             widgets->child.end();
@@ -6282,14 +6262,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         action_button("Door RR", "Break Rear Right Door", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 3); });
                         action_button("Hood", "Break Hood Off", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 4); });
                         action_button("Trunk", "Break Trunk Off", [&] { native_break_vehicle_door(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), 5); });
-                        action_button("Name", "Copy Vehicle Name", [&] { copy_player_value_to_clipboard(get_vehicle_display_name(selected_vehicle), "Vehicle name copied", "Vehicle name unavailable"); });
-                        action_button("Driver", "Copy Driver Name", [&] { copy_player_value_to_clipboard(get_vehicle_driver_name(selected_vehicle), "Driver name copied", "Driver name unavailable"); });
-                        action_button("Coords", "Copy Vehicle Coordinates", [&] {
-                            char coordinates[64]{};
-                            const D3DXVECTOR3 position = selected_vehicle.Pointer ? selected_vehicle.Pointer->GetPos() : D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-                            std::snprintf(coordinates, sizeof(coordinates), "%.1f, %.1f, %.1f", position.x, position.y, position.z);
-                            copy_player_value_to_clipboard(coordinates, "Coordinates copied", "Coordinates unavailable");
-                            });
 
                         PopStyleColor(3);
                         PopStyleVar();
@@ -6904,7 +6876,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
                 widgets->checkbox(I_EYE__OFF, "Stream Proof", &g_Config.General->StreamProof); 
                 widgets->checkbox(I_SHIELD, "Safe Mode", &g_Config.General->SafeMode);
-                TextDisabled("Safe Mode disables all native-based actions.");
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
                 //    std::thread([&] { NvidiaProofing::Execute(g_Config.General->NVStreamProof);}).detach();
                 //}
