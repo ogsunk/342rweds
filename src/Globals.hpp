@@ -91,6 +91,7 @@ public:
 
 	ID3D11ShaderResourceView* Logo = nullptr;
 	ID3D11ShaderResourceView* NotificationLogo = nullptr;
+	ID3D11ShaderResourceView* MapTexture = nullptr;
 
 
 

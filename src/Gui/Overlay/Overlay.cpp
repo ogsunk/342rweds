@@ -397,6 +397,29 @@ namespace Gui
 		{
 			D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, sunketsware_logo_png, sunketsware_logo_png_len, &Info, Pump, &g_Variables.NotificationLogo, 0);
 		}
+
+		if (g_Variables.MapTexture == nullptr)
+		{
+			const char* map_paths[] = {
+				"map.png",
+				"C:\\Users\\tyler\\Desktop\\Wizard External\\build\\VisualPort\\map.png"
+			};
+
+			for (const char* path : map_paths)
+			{
+				std::ifstream file(path, std::ios::binary);
+				if (!file.is_open())
+					continue;
+
+				std::vector<char> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+				if (!data.empty())
+				{
+					D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, data.data(), data.size(), &Info, Pump, &g_Variables.MapTexture, 0);
+				}
+				if (g_Variables.MapTexture != nullptr)
+					break;
+			}
+		}
 	}
 
 	bool Overlay::CreateDeviceD3D(HWND hWnd)

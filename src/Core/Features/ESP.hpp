@@ -15,7 +15,7 @@ namespace Core
 			void Draw();
 			void DrawVehicle();
 			void DrawRadar();
-			void DrawMiscEffects();
+			void DrawMiscEffects(); // legacy no-op (Misc ESP removed from UI)
 			void DrawSelectionIndicators();
 			void Observers();
 			static void BypassElectronAC();

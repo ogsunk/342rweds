@@ -5396,7 +5396,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
     widgets->nav.tabs = {
         { I_CURRENT__LOCATION, "Combat", { { I_SETTINGS, "Aimbot" }, { I_SWORD, "SilentAim" }, { I_DOTS, "TriggerBot" } } },
-        { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" }, { I_CURRENT__LOCATION, "Radar" }, { I_SPARKLES, "Misc ESP" } } },
+        { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" }, { I_CURRENT__LOCATION, "Radar" } } },
         { I_USER__COG, "Player List", { { I_USER, "Player List" }, { I_HEART, "Friend List" } } },
         { I_CAR, "Vehicle List", {  } },
         { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" } } },
@@ -6018,45 +6018,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             widgets->child.end();
         }
         EndGroup();
-        });
-
-    widgets->nav.addpage(1, [&] {
-        auto sync_color = [](const float* src, ImColor& dst) {
-            dst.Value.x = src[0]; dst.Value.y = src[1]; dst.Value.z = src[2]; dst.Value.w = src[3];
-        };
-        auto load_color = [](float* dst, const ImColor& src) {
-            dst[0] = src.Value.x; dst[1] = src.Value.y; dst[2] = src.Value.z; dst[3] = src.Value.w;
-        };
-
-        float impact_color[4]; load_color(impact_color, g_Config.ESP->ImpactMarkerCol);
-        float glow_color[4]; load_color(glow_color, g_Config.ESP->GlowEffectCol);
-        float particles_color[4]; load_color(particles_color, g_Config.ESP->ParticlesCol);
-        float tracer_color[4]; load_color(tracer_color, g_Config.ESP->BulletTracerCol);
-
-        BeginGroup();
-        {
-            widgets->child.begin(I_SPARKLES, "Bullet Tracer", 1, { 0, 312 ds });
-            {
-                widgets->checkbox(I_SPARKLES, "Enable Bullet Tracer", &g_Config.ESP->BulletTracerEnabled);
-                widgets->coloredit(I_SPARKLES, "Bullet Tracer Color", tracer_color);
-                widgets->spacing(6 ds);
-                widgets->checkbox(I_TARGET, "Impact Marker", &g_Config.ESP->ImpactMarker);
-                widgets->coloredit(I_TARGET, "Impact Marker Color", impact_color);
-                widgets->spacing(6 ds);
-                widgets->checkbox(I_EYE, "Glow Effect", &g_Config.ESP->GlowEffect);
-                widgets->coloredit(I_EYE, "Glow Color", glow_color);
-                widgets->spacing(6 ds);
-                widgets->checkbox(I_SPARKLES, "Particles", &g_Config.ESP->Particles);
-                widgets->coloredit(I_SPARKLES, "Particles Color", particles_color);
-            }
-            widgets->child.end();
-        }
-        EndGroup();
-
-        sync_color(impact_color, g_Config.ESP->ImpactMarkerCol);
-        sync_color(glow_color, g_Config.ESP->GlowEffectCol);
-        sync_color(particles_color, g_Config.ESP->ParticlesCol);
-        sync_color(tracer_color, g_Config.ESP->BulletTracerCol);
         });
 
     widgets->nav.addpage(2, [&] {

@@ -346,7 +346,6 @@ void Gui::Rendering()
 	// Radar and Misc ESP render unconditionally so they do not depend on the
 	// game window being the foreground window or on the ESP master toggle.
 	Features::g_Esp.DrawRadar();
-	Features::g_Esp.DrawMiscEffects();
 
 	slate->draw(g_pd3dDevice, g_pd3dDeviceContext, g_pSwapChain);
 

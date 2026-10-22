@@ -685,24 +685,69 @@ void Core::Features::cEsp::DrawRadar()
 	const ImVec2 max{ min.x + width, min.y + height };
 	const ImVec2 center{ min.x + width * 0.5f, min.y + height * 0.5f };
 
-	// Panel is always drawn at full opacity so it cannot disappear.
-	draw->AddRectFilled(min, max, IM_COL32(12, 12, 15, 235), 8.0f);
-	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
-	draw->AddLine(ImVec2(center.x, min.y), ImVec2(center.x, max.y), IM_COL32(255, 255, 255, 40), 1.0f);
-	draw->AddLine(ImVec2(min.x, center.y), ImVec2(max.x, center.y), IM_COL32(255, 255, 255, 40), 1.0f);
-	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 5.0f), IM_COL32(205, 50, 65, 255), "RADAR");
+	const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
+	const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 2.0f);
+	const float crop_half = range / zoom;
+	const float scale = (std::min(width, height) * 0.5f) / crop_half;
+	const float transparency = std::clamp(cfg->RadarTransparency, 0.0f, 1.0f);
 
 	auto* local = Core::SDK::Pointers::pLocalPlayer;
 	if (!local)
 	{
+		draw->AddRectFilled(min, max, IM_COL32(12, 12, 15, 235), 8.0f);
+		draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
+		draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 5.0f), IM_COL32(205, 50, 65, 255), "RADAR");
 		draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 22.0f), IM_COL32(255, 120, 120, 255), "Local player unavailable");
 		return;
 	}
 
 	const D3DXVECTOR3 origin = local->GetPos();
-	const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
-	const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 5.0f);
-	const float scale = (std::min(width, height) * 0.5f / range) * zoom;
+
+	// GTA V world bounds for the map image (minimap.ymt: X -4140..4860, Y -5100..8400).
+	constexpr float MAP_MIN_X = -4140.0f;
+	constexpr float MAP_MAX_X = 4860.0f;
+	constexpr float MAP_MIN_Y = -5100.0f;
+	constexpr float MAP_MAX_Y = 8400.0f;
+	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
+	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
+
+	draw->AddRectFilled(min, max, IM_COL32(12, 12, 15, 235), 8.0f);
+
+	// Map background, cropped north-up around the local player.
+	if (g_Variables.MapTexture != nullptr)
+	{
+		const float u = (origin.x - MAP_MIN_X) / MAP_W;
+		const float v = (MAP_MAX_Y - origin.y) / MAP_H;
+		const float du = crop_half / MAP_W;
+		const float dv = crop_half / MAP_H;
+
+		draw->PushClipRect(min, max, true);
+		draw->AddImage(
+			reinterpret_cast<ImTextureID>(g_Variables.MapTexture),
+			min, max,
+			ImVec2(u - du, v - dv), ImVec2(u + du, v + dv),
+			IM_COL32(255, 255, 255, static_cast<int>(transparency * 255.0f)));
+		draw->PopClipRect();
+	}
+
+	// Range rings + border.
+	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 28), 48, 1.0f);
+	draw->AddCircle(center, std::min(width, height) * 0.45f, IM_COL32(255, 255, 255, 22), 64, 1.0f);
+	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
+
+	// Header + North indicator.
+	draw->AddRectFilled(min, ImVec2(max.x, min.y + 20.0f), IM_COL32(8, 8, 10, 230), 8.0f, ImDrawFlags_RoundCornersTop);
+	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 4.0f), IM_COL32(205, 50, 65, 255), "RADAR");
+	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, min.y + 24.0f), IM_COL32(255, 255, 255, 220), "N");
+
+	// Player marker (arrow) at the centre.
+	{
+		const ImVec2 p1(center.x, center.y - 8.0f);
+		const ImVec2 p2(center.x - 5.5f, center.y + 6.0f);
+		const ImVec2 p3(center.x + 5.5f, center.y + 6.0f);
+		draw->AddTriangleFilled(p1, p2, p3, IM_COL32(205, 50, 65, 255));
+		draw->AddTriangle(p1, p2, p3, IM_COL32(255, 255, 255, 235), 1.2f);
+	}
 
 	ImFont* font = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
 
