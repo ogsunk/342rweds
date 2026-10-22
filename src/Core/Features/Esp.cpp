@@ -665,8 +665,6 @@ namespace
 void Core::Features::cEsp::DrawRadar()
 {
 	auto* cfg = g_Config.ESP;
-	if (!cfg)
-		return;
 
 	ImDrawList* draw = ImGui::GetBackgroundDrawList();
 
@@ -797,8 +795,6 @@ void Core::Features::cEsp::DrawRadar()
 void Core::Features::cEsp::DrawMiscEffects()
 {
 	auto* cfg = g_Config.ESP;
-	if (!cfg)
-		return;
 	if (!cfg->BulletTracerEnabled && !cfg->ImpactMarker && !cfg->GlowEffect && !cfg->Particles)
 		return;
 	if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
