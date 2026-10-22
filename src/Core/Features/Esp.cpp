@@ -663,26 +663,178 @@ namespace
 
 void Core::Features::cEsp::DrawRadar()
 {
-	// Diagnostic readout so we can confirm this path runs and see the values.
+	auto* cfg = g_Config.ESP;
+	if (!cfg)
+		return;
+
+	ImDrawList* draw = ImGui::GetBackgroundDrawList();
+
+	// Diagnostic readout (remove once verified).
 	const auto& snapshot = Core::SDK::Game::GetEntityListSnapshotCached();
 	char debug[200]{};
 	std::snprintf(debug, sizeof(debug), "ESP=%d Radar=%d Ent=%d LMB=%d LP=%d T=%d",
-		g_Config.ESP->Enabled ? 1 : 0,
-		g_Config.ESP->RadarEnabled ? 1 : 0,
+		cfg->Enabled ? 1 : 0,
+		cfg->RadarEnabled ? 1 : 0,
 		static_cast<int>(snapshot.size()),
 		(GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0,
 		Core::SDK::Pointers::pLocalPlayer ? 1 : 0,
-		g_Config.ESP->BulletTracerEnabled ? 1 : 0);
-	ImGui::GetBackgroundDrawList()->AddText(ImVec2(10.0f, 10.0f), IM_COL32(255, 255, 255, 220), debug);
-	// Magenta test rectangle: proves arbitrary rects render on this draw list.
-	ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(300.0f, 10.0f), ImVec2(420.0f, 60.0f), IM_COL32(255, 0, 255, 200));
+		cfg->BulletTracerEnabled ? 1 : 0);
+	draw->AddText(ImVec2(10.0f, 10.0f), IM_COL32(255, 255, 255, 220), debug);
 
-	draw_radar_overlay();
+	if (!cfg->RadarEnabled)
+		return;
+
+	float width = cfg->RadarWidth;
+	float height = cfg->RadarHeight;
+	if (!(width > 50.0f) || !std::isfinite(width)) width = 220.0f;
+	if (!(height > 50.0f) || !std::isfinite(height)) height = 220.0f;
+	width = std::clamp(width, 100.0f, 600.0f);
+	height = std::clamp(height, 100.0f, 600.0f);
+
+	const ImVec2 min{ 40.0f, 220.0f };
+	const ImVec2 max{ min.x + width, min.y + height };
+	const ImVec2 center{ min.x + width * 0.5f, min.y + height * 0.5f };
+
+	// Panel is always drawn at full opacity so it cannot disappear.
+	draw->AddRectFilled(min, max, IM_COL32(12, 12, 15, 235), 8.0f);
+	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
+	draw->AddLine(ImVec2(center.x, min.y), ImVec2(center.x, max.y), IM_COL32(255, 255, 255, 40), 1.0f);
+	draw->AddLine(ImVec2(min.x, center.y), ImVec2(max.x, center.y), IM_COL32(255, 255, 255, 40), 1.0f);
+	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 5.0f), IM_COL32(205, 50, 65, 255), "RADAR");
+
+	auto* local = Core::SDK::Pointers::pLocalPlayer;
+	if (!local)
+	{
+		draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 22.0f), IM_COL32(255, 120, 120, 255), "Local player unavailable");
+		return;
+	}
+
+	const D3DXVECTOR3 origin = local->GetPos();
+	const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
+	const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 5.0f);
+	const float scale = (std::min(width, height) * 0.5f / range) * zoom;
+
+	ImFont* font = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
+
+	int drawn = 0;
+	for (const auto& entity : snapshot)
+	{
+		if (!entity.Ped || entity.Ped == local)
+			continue;
+
+		const bool dead = entity.Health <= 0.0f;
+		if (dead && !cfg->RadarShowDead)
+			continue;
+
+		if (entity.IsFriend)
+		{
+			if (!cfg->RadarShowFriends)
+				continue;
+		}
+		else if (entity.IsPlayer)
+		{
+			if (!cfg->RadarShowPlayers)
+				continue;
+		}
+		else
+		{
+			if (!cfg->RadarShowNPCs)
+				continue;
+		}
+
+		const float dx = entity.Pos.x - origin.x;
+		const float dy = entity.Pos.y - origin.y;
+		const float dist = std::sqrt(dx * dx + dy * dy);
+		if (dist > range)
+			continue;
+
+		const ImVec2 dot{ center.x + dx * scale, center.y - dy * scale };
+		if (dot.x < min.x + 2.0f || dot.x > max.x - 2.0f || dot.y < min.y + 2.0f || dot.y > max.y - 2.0f)
+			continue;
+
+		const ImColor dot_color = entity.IsFriend ? cfg->RadarFriendCol
+			: (entity.IsPlayer ? cfg->RadarPlayerCol : cfg->RadarNpcCol);
+		draw->AddCircleFilled(dot, 3.5f, dot_color, 12);
+		draw->AddCircle(dot, 3.5f, IM_COL32(0, 0, 0, 160), 12, 1.0f);
+		++drawn;
+
+		if (cfg->RadarShowNames || cfg->RadarShowDistances)
+		{
+			std::string label;
+			if (cfg->RadarShowNames)
+				label = entity.NetworkInfo.UserName;
+			if (cfg->RadarShowDistances)
+			{
+				if (!label.empty())
+					label += " ";
+				label += std::to_string(static_cast<int>(dist)) + "m";
+			}
+			if (!label.empty() && font)
+				draw->AddText(font, 10.0f, ImVec2(dot.x + 5.0f, dot.y - 5.0f), IM_COL32(255, 255, 255, 220), label.c_str());
+		}
+	}
+
+	if (drawn == 0)
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 8.0f, min.y + 22.0f), IM_COL32(200, 200, 200, 220), "No entities in range");
 }
 
 void Core::Features::cEsp::DrawMiscEffects()
 {
-	draw_misc_effects();
+	auto* cfg = g_Config.ESP;
+	if (!cfg)
+		return;
+	if (!cfg->BulletTracerEnabled && !cfg->ImpactMarker && !cfg->GlowEffect && !cfg->Particles)
+		return;
+	if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+		return;
+
+	ImDrawList* draw = ImGui::GetBackgroundDrawList();
+	const ImVec2 aim{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowCenter.y };
+
+	if (cfg->BulletTracerEnabled)
+	{
+		ImVec2 from{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y };
+		auto* local = Core::SDK::Pointers::pLocalPlayer;
+		if (local)
+		{
+			const D3DXVECTOR3 muzzle = local->GetBonePosDefault(SKEL_R_Hand);
+			const D3DXVECTOR2 screen = Core::SDK::Game::WorldToScreen(muzzle);
+			if (Core::SDK::Game::IsOnScreen(screen))
+				from = ImVec2(screen.x, screen.y);
+		}
+		draw->AddLine(from, aim, cfg->BulletTracerCol, 2.0f);
+		draw->AddCircleFilled(from, 3.0f, cfg->BulletTracerCol, 8);
+	}
+
+	if (cfg->ImpactMarker)
+	{
+		draw->AddCircle(aim, 9.0f, cfg->ImpactMarkerCol, 16, 1.5f);
+		draw->AddLine(ImVec2(aim.x - 12.0f, aim.y), ImVec2(aim.x + 12.0f, aim.y), cfg->ImpactMarkerCol, 1.5f);
+		draw->AddLine(ImVec2(aim.x, aim.y - 12.0f), ImVec2(aim.x, aim.y + 12.0f), cfg->ImpactMarkerCol, 1.5f);
+	}
+
+	if (cfg->GlowEffect)
+	{
+		for (int i = 8; i >= 1; --i)
+		{
+			ImVec4 glow = cfg->GlowEffectCol.Value;
+			glow.w *= 0.06f;
+			draw->AddCircleFilled(aim, 4.0f + static_cast<float>(i) * 3.0f, ImGui::GetColorU32(glow), 24);
+		}
+	}
+
+	if (cfg->Particles)
+	{
+		static float phase = 0.0f;
+		phase += ImGui::GetIO().DeltaTime;
+		for (int i = 0; i < 10; ++i)
+		{
+			const float angle = phase * 3.0f + static_cast<float>(i) * 0.628f;
+			const float radius = 8.0f + std::fmod(phase * 45.0f + static_cast<float>(i) * 7.0f, 34.0f);
+			const ImVec2 p{ aim.x + std::cos(angle) * radius, aim.y + std::sin(angle) * radius };
+			draw->AddCircleFilled(p, 1.8f, cfg->ParticlesCol, 8);
+		}
+	}
 }
 
 void Core::Features::cEsp::Draw()
