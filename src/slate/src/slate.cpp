@@ -5396,7 +5396,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
     widgets->nav.tabs = {
         { I_CURRENT__LOCATION, "Combat", { { I_SETTINGS, "Aimbot" }, { I_SWORD, "SilentAim" }, { I_DOTS, "TriggerBot" } } },
-        { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" } } },
+        { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" }, { I_CURRENT__LOCATION, "Radar" }, { I_SPARKLES, "Misc ESP" } } },
         { I_USER__COG, "Player List", { { I_USER, "Player List" }, { I_HEART, "Friend List" } } },
         { I_CAR, "Vehicle List", {  } },
         { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" } } },
@@ -5985,6 +5985,78 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         g_Config.VehicleESP.BoxCol.Value.y = vehicle_box_color[1];
         g_Config.VehicleESP.BoxCol.Value.z = vehicle_box_color[2];
         g_Config.VehicleESP.BoxCol.Value.w = vehicle_box_color[3];
+        });
+
+    widgets->nav.addpage(1, [&] {
+        BeginGroup();
+        {
+            widgets->child.begin(I_CURRENT__LOCATION, "Radar ESP", 1, { 0, 312 ds });
+            {
+                widgets->checkbox(I_CURRENT__LOCATION, "Enable Radar", &g_Config.ESP->RadarEnabled);
+                widgets->checkbox(I_USER, "Show Players", &g_Config.ESP->RadarShowPlayers);
+                widgets->checkbox(I_USER__COG, "Show NPCs", &g_Config.ESP->RadarShowNPCs);
+                widgets->checkbox(I_MOOD__SILENCE, "Show Dead", &g_Config.ESP->RadarShowDead);
+                widgets->checkbox(I_TEXT__SIZE, "Show Names", &g_Config.ESP->RadarShowNames);
+                widgets->checkbox(I_RULER__MEASURE, "Show Distances", &g_Config.ESP->RadarShowDistances);
+                widgets->checkbox(I_HEART, "Show Friends", &g_Config.ESP->RadarShowFriends);
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+
+        SameLine(0, 8.f ds);
+        BeginGroup();
+        {
+            widgets->child.begin(I_SETTINGS, "Radar Settings", 2, { 0, 312 ds });
+            {
+                widgets->sliderfloat(I_GRADIENTER, "Range", &g_Config.ESP->RadarRange, 1.0f, 1000.0f, "%.0fm");
+                widgets->sliderfloat(I_GRADIENTER, "Width", &g_Config.ESP->RadarWidth, 100.0f, 600.0f, "%.0fpx");
+                widgets->sliderfloat(I_GRADIENTER, "Height", &g_Config.ESP->RadarHeight, 100.0f, 600.0f, "%.0fpx");
+                widgets->sliderfloat(I_GRADIENTER, "Zoom", &g_Config.ESP->RadarZoom, 0.2f, 5.0f, "%.2fx");
+                widgets->sliderfloat(I_GRADIENTER, "Transparency", &g_Config.ESP->RadarTransparency, 0.0f, 1.0f, "%.2f");
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+        });
+
+    widgets->nav.addpage(1, [&] {
+        auto sync_color = [](const float* src, ImColor& dst) {
+            dst.Value.x = src[0]; dst.Value.y = src[1]; dst.Value.z = src[2]; dst.Value.w = src[3];
+        };
+        auto load_color = [](float* dst, const ImColor& src) {
+            dst[0] = src.Value.x; dst[1] = src.Value.y; dst[2] = src.Value.z; dst[3] = src.Value.w;
+        };
+
+        float impact_color[4]; load_color(impact_color, g_Config.ESP->ImpactMarkerCol);
+        float glow_color[4]; load_color(glow_color, g_Config.ESP->GlowEffectCol);
+        float particles_color[4]; load_color(particles_color, g_Config.ESP->ParticlesCol);
+        float tracer_color[4]; load_color(tracer_color, g_Config.ESP->BulletTracerCol);
+
+        BeginGroup();
+        {
+            widgets->child.begin(I_SPARKLES, "Bullet Tracer", 1, { 0, 312 ds });
+            {
+                widgets->checkbox(I_SPARKLES, "Enable Bullet Tracer", &g_Config.ESP->BulletTracerEnabled);
+                widgets->coloredit(I_SPARKLES, "Bullet Tracer Color", tracer_color);
+                widgets->spacing(6 ds);
+                widgets->checkbox(I_TARGET, "Impact Marker", &g_Config.ESP->ImpactMarker);
+                widgets->coloredit(I_TARGET, "Impact Marker Color", impact_color);
+                widgets->spacing(6 ds);
+                widgets->checkbox(I_EYE, "Glow Effect", &g_Config.ESP->GlowEffect);
+                widgets->coloredit(I_EYE, "Glow Color", glow_color);
+                widgets->spacing(6 ds);
+                widgets->checkbox(I_SPARKLES, "Particles", &g_Config.ESP->Particles);
+                widgets->coloredit(I_SPARKLES, "Particles Color", particles_color);
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+
+        sync_color(impact_color, g_Config.ESP->ImpactMarkerCol);
+        sync_color(glow_color, g_Config.ESP->GlowEffectCol);
+        sync_color(particles_color, g_Config.ESP->ParticlesCol);
+        sync_color(tracer_color, g_Config.ESP->BulletTracerCol);
         });
 
     widgets->nav.addpage(2, [&] {
@@ -7131,13 +7203,6 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                     {
                         PopStyleVar();
                         widgets->nav.drawsubtabs();
-                        constexpr const char* search_hint = "Search Features";
-                        const float search_hint_width = CalcTextSize(search_hint).x;
-                        SetCursorPos({ GetWindowWidth() - 49 ds - search_hint_width, 22 ds });
-                        g_style->push(pcol_bg3, g_style->col(pcol_bg3, 0));
-                        g_style->push(pcol_border, g_style->col(pcol_border, 0));
-                        widgets->textinput("##searchbar", g_search->buf, sizeof(g_search->buf), { .padding = vec2{ 0, 0 }, .icon = I_SEARCH, .hint = search_hint, .size = ImVec2{ search_hint_width + 24 ds, 16 ds }, .bgcol = pcolor(0, 0, 0, 0), .rounding = 0 ds });
-                        g_style->pop(2);
                         GetWindowDrawList()->AddRectFilled(GetWindowPos() + ImVec2{ 0, GetWindowHeight() - 1 }, GetWindowPos() + ImVec2{ 44.f ds, GetWindowHeight() }, g_style->col(pcol_border, 2.f));
                     }
                     EndChild();
@@ -7147,12 +7212,8 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                     PushStyleVar(ImGuiStyleVar_ItemSpacing, vec2{ 8, 8 });
                     BeginChild("page", { 0, 0 }, ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
                     {
-                        if (strlen(g_search->buf) == 0) {
-                            widgets->nav.drawpage();
-                            g_search->visit_current_page();
-                        }
-                        else
-                            g_search->draw();
+                        widgets->nav.drawpage();
+                        g_search->visit_current_page();
 
                         SetCursorPos(GetCurrentWindow()->Scroll);
                         BeginChild("gradient", { 100, 100 }, 0, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs);
