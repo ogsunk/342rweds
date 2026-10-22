@@ -665,13 +665,17 @@ void Core::Features::cEsp::DrawRadar()
 {
 	// Diagnostic readout so we can confirm this path runs and see the values.
 	const auto& snapshot = Core::SDK::Game::GetEntityListSnapshotCached();
-	char debug[160]{};
-	std::snprintf(debug, sizeof(debug), "ESP=%d Radar=%d Ent=%d LMB=%d",
+	char debug[200]{};
+	std::snprintf(debug, sizeof(debug), "ESP=%d Radar=%d Ent=%d LMB=%d LP=%d T=%d",
 		g_Config.ESP->Enabled ? 1 : 0,
 		g_Config.ESP->RadarEnabled ? 1 : 0,
 		static_cast<int>(snapshot.size()),
-		(GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0);
+		(GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0,
+		Core::SDK::Pointers::pLocalPlayer ? 1 : 0,
+		g_Config.ESP->BulletTracerEnabled ? 1 : 0);
 	ImGui::GetBackgroundDrawList()->AddText(ImVec2(10.0f, 10.0f), IM_COL32(255, 255, 255, 220), debug);
+	// Magenta test rectangle: proves arbitrary rects render on this draw list.
+	ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(300.0f, 10.0f), ImVec2(420.0f, 60.0f), IM_COL32(255, 0, 255, 200));
 
 	draw_radar_overlay();
 }
