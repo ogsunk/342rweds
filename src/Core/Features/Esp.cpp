@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include "friends.hpp"
 #include "TargetHighlight.hpp"
 #include "SunketsWareVisuals.hpp"
@@ -667,10 +668,24 @@ void Core::Features::cEsp::DrawRadar()
 	if (!cfg)
 		return;
 
-	ImDrawList* draw = ImGui::GetBackgroundDrawList();
+	ImDrawList* draw = ImGui::GetForegroundDrawList();
 
 	// Diagnostic readout (remove once verified).
 	const auto& snapshot = Core::SDK::Game::GetEntityListSnapshotCached();
+	{
+		static int debug_frames = 0;
+		if (++debug_frames % 120 == 0)
+		{
+			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\radar_debug.txt", std::ios::app);
+			log << "esp=" << (cfg->Enabled ? 1 : 0)
+				<< " radar=" << (cfg->RadarEnabled ? 1 : 0)
+				<< " local=" << (Core::SDK::Pointers::pLocalPlayer ? 1 : 0)
+				<< " ents=" << snapshot.size()
+				<< " style_alpha=" << ImGui::GetStyle().Alpha
+				<< " tracer=" << (cfg->BulletTracerEnabled ? 1 : 0)
+				<< "\n";
+		}
+	}
 	char debug[200]{};
 	std::snprintf(debug, sizeof(debug), "ESP=%d Radar=%d Ent=%d LMB=%d LP=%d T=%d",
 		cfg->Enabled ? 1 : 0,
@@ -788,7 +803,7 @@ void Core::Features::cEsp::DrawMiscEffects()
 	if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
 		return;
 
-	ImDrawList* draw = ImGui::GetBackgroundDrawList();
+	ImDrawList* draw = ImGui::GetForegroundDrawList();
 	const ImVec2 aim{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowCenter.y };
 
 	if (cfg->BulletTracerEnabled)
