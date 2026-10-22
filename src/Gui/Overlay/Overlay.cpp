@@ -239,16 +239,6 @@ namespace Gui
 
 				//ImGui::GetBackgroundDrawList( )->AddRectFilled( ImVec2( 0, 0 ), ImVec2( g_Variables.g_vGameWindowSize.x, g_Variables.g_vGameWindowSize.y ), ImColor( 0.f, 0.f, 0.f, BgAlpha >= 0.4f ? 0.4f : BgAlpha ) );
 
-				{
-					static bool logged_overlay = false;
-					if (!logged_overlay)
-					{
-						logged_overlay = true;
-						std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\overlay_debug.txt");
-						log << "overlay render reached\n";
-					}
-				}
-
 				Gui::Rendering();
 
 				ImGui::PopStyleVar();

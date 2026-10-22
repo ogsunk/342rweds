@@ -263,21 +263,6 @@ void Gui::ApplyStreamProofAffinity(bool enable) {
 
 void Gui::Rendering()
 {
-	{
-		static int gui_frames = 0;
-		++gui_frames;
-		if (gui_frames == 1 || gui_frames % 60 == 0)
-		{
-			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\gui_debug.txt", std::ios::app);
-			log << "frame=" << gui_frames
-				<< " esp_ptr=" << (g_Config.ESP ? 1 : 0)
-				<< " radar=" << (g_Config.ESP && g_Config.ESP->RadarEnabled ? 1 : 0)
-				<< " tracer=" << (g_Config.ESP && g_Config.ESP->BulletTracerEnabled ? 1 : 0)
-				<< " alpha=" << ImGui::GetStyle().Alpha
-				<< "\n";
-		}
-	}
-
 	HWND ActiveWindow = GetForegroundWindow();
 
 	// Apply short-lived player impulses (launch/lift/ragdoll knock) every
