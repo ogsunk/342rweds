@@ -207,15 +207,13 @@ namespace NotifyManager
             const auto TitlePos = ImVec2(TextStartX + BadgeSize + 8.f, HeaderCenterY - (TitleTxtSize.y * 0.5f) - 2.f);
             const auto DescPos = ImVec2(TextStartX, TitlePos.y + TitleTxtSize.y + 8.f);
 
-            // SunketsWare logo badge
-            DrawList->AddRectFilled(BadgeMin, BadgeMax, ImGui::GetColorU32(AccentColor), 5.f);
-            DrawList->AddText(
-                HeaderFont,
-                HeaderFont->FontSize * 0.88f,
-                ImVec2(BadgeMin.x + 5.5f, BadgeMin.y + 1.f),
-                ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, NotifyAnim->second.Alpha)),
-                "S"
-            );
+            // SunketsWare logo
+            if (g_Variables.Logo != nullptr) {
+                DrawList->AddImage(reinterpret_cast<ImTextureID>(g_Variables.Logo), BadgeMin, BadgeMax);
+            }
+            else {
+                DrawList->AddRectFilled(BadgeMin, BadgeMax, ImGui::GetColorU32(AccentColor), 5.f);
+            }
 
             DrawList->AddText(
                 HeaderFont,

@@ -5854,9 +5854,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->sliderfloat(I_RULER__MEASURE, "Text Thickness", &g_Config.ESP->TextThickness, 0.0f, 1.0f, "%.0fpx");
                 widgets->coloredit(I_BONE, "Skeleton Color", esp_skeleton_color);
                 widgets->coloredit(I_EYE, "Friend Color", esp_friend_color);
-                widgets->coloredit(I_EYE, "True Invisible Color", esp_trueinvisible_color);
-                widgets->coloredit(I_EYE, "Visible Color", esp_visible_color);
-                widgets->coloredit(I_EYE__OFF, "Invisible Color", esp_invisible_color);
                 widgets->coloredit(I_USER, "Player Names Color", esp_playernames_color);
                 widgets->coloredit(I_SWORD, "Weapon Names Color", esp_weaponnames_color);
                 widgets->coloredit(I_VECTOR__SPLINE, "Distance Color", esp_distance_color);
@@ -6356,6 +6353,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         teleport_to_waypoint();
                     }
                     widgets->binder(I_COMMAND, "TP Waypoint Key", &g_Config.Player->TpWaypointKey);
+                    widgets->binder(I_COMMAND, "Fake Lag Key", &g_Config.Player->FakeLagKey);
+                    widgets->binder(I_COMMAND, "Fast Run Key", &g_Config.Player->FastRunKey);
+                    widgets->binder(I_COMMAND, "NoClip Key", &g_Config.Player->NoClipKey);
                     PopStyleColor(3);
                     PopStyleVar();
 
@@ -6402,7 +6402,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (g_Config.Player->NoClipEnabled) {
                         widgets->sliderfloat(I_GRADIENTER, "NoClip Speed", &g_Config.Player->NoClipSpeed, 0.1f, 20.0f, "%.1f");
                     }
-                    widgets->binder(I_COMMAND, "NoClip Key", &g_Config.Player->NoClipKey);
 
                     bool fast_run = g_Config.Player->FastRun;
                     if (widgets->checkbox(I_SPARKLES, "Fast Run", &fast_run)) {
@@ -6412,8 +6411,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         widgets->sliderfloat(I_GRADIENTER, "Run Speed", &g_Config.Player->RunSpeed, 0.1f, 10.0f, "%.2f");
                         local_player->SetSpeed(g_Config.Player->RunSpeed);
                     }
-                    widgets->binder(I_COMMAND, "Fast Run Key", &g_Config.Player->FastRunKey);
-
                     widgets->checkbox(I_SPARKLES, "Infinite Stamina", &g_Config.Player->InfiniteStamina);
                     widgets->checkbox(I_SHIELD, "Infinite Armor", &g_Config.Player->RegenerateArmor);
                     widgets->checkbox(I_SHIELD, "No Fall Damage", &g_Config.Player->NoFallDamage);
@@ -6908,6 +6905,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         {
             widgets->child.begin(I_WAVE__SAW__TOOL, "General", 1, { 0, 280 ds });
             {
+                widgets->binder(I_COMMAND, "Menu Key", &g_Config.General->MenuKey);
                 widgets->checkbox(I_SPARKLES, "Watermark", &g_Config.General->WaterMark);
                 widgets->checkbox(I_KEYBOARD, "Keybind List", &g_Config.General->KeybindList);
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
@@ -6926,21 +6924,12 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 //}
                 widgets->checkbox(I_EYE__BOLT, "Firstperson Visible check", &g_Config.ESP->IgnoreLocalPed);      
                 widgets->checkbox(I_TARGET, "Observers", &g_Config.General->SpectatorList);
-                widgets->binder(I_COMMAND, "Menu Key", &g_Config.General->MenuKey);
                 widgets->checkbox(I_MOUSE, "Custom Input", &g_Config.General->CustomInput);
                 widgets->spacing(12 ds);
                 widgets->separator();
                 widgets->spacing(10 ds);
 
                 static ULONGLONG last_autoconfig_load = 0;
-
-                if (widgets->checkbox(I_FOLDER__COG, "Site Config", &g_Config.General->AutoConfig))
-                {
-                    if (g_Config.General->AutoConfig)
-                    {
-                        last_autoconfig_load = GetTickCount64();
-                    }
-                }
 
                 if (g_Config.General->AutoConfig)
                 {
@@ -7383,12 +7372,14 @@ void c_slate::draw_pinned_overlays() {
             Dummy({ 22 ds, GImGui->FontSize });
             SameLine(0, 4 ds);
             PushFont(fonts[font].get(16));
-            Text("SunketsWare");
+            TextColored(g_style->col(pcol_text).vec4(), "Sunkets");
+            SameLine(0, 0.f);
+            TextColored(g_style->col(pcol_scheme).vec4(), "Ware");
             SameLine(0, 14 ds);
             widgets->separator(true, 12 ds);
             SameLine(0, 14 ds);
             PushFont(fonts[icons].get(16));
-            TextDisabled(I_CLOCK);
+            TextColored(g_style->col(pcol_scheme).vec4(), "%s", I_CLOCK);
             PopFont();
             SameLine(0, 8 ds);
             draw_fixed_width_overlay_text(watermark_metrics.uptime_text.c_str(), "00:00:00");
@@ -7396,7 +7387,7 @@ void c_slate::draw_pinned_overlays() {
             widgets->separator(true, 12 ds);
             SameLine(0, 14 ds);
             PushFont(fonts[icons].get(16));
-            TextDisabled(I_BRAND__SPEEDTEST);
+            TextColored(g_style->col(pcol_scheme).vec4(), "%s", I_BRAND__SPEEDTEST);
             PopFont();
             SameLine(0, 8 ds);
             draw_fixed_width_overlay_text(watermark_metrics.cpu_text.c_str(), "100.0% CPU");
@@ -7436,7 +7427,7 @@ void c_slate::draw_pinned_overlays() {
             {
                 SetCursorPos(vec2{ 10, 10 });
                 PushFont(fonts[icons].get(16));
-                TextDisabled(I_KEYBOARD);
+                TextColored(g_style->col(pcol_scheme).vec4(), "%s", I_KEYBOARD);
                 PopFont();
                 SameLine(0, 8 ds);
                 PushFont(fonts[font].get(16));
