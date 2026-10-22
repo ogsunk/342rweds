@@ -2071,6 +2071,41 @@ namespace {
         return Core::Features::NativeCaller::InvokeNative(0xCEA04D83135264CCull, { handle, static_cast<uint64_t>(static_cast<uint32_t>(amount)) });
     }
 
+    bool native_give_weapon(uintptr_t ped, uint32_t weapon_hash, int ammo) {
+        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+        if (!handle) {
+            return false;
+        }
+
+        // GIVE_WEAPON_TO_PED(ped, hash, ammo, isHidden, forceInHand)
+        return Core::Features::NativeCaller::InvokeNative(0xBF0FD6E56C964FCBull, {
+            handle,
+            static_cast<uint64_t>(weapon_hash),
+            static_cast<uint64_t>(static_cast<uint32_t>(ammo)),
+            0ull,
+            1ull
+        });
+    }
+
+    bool native_fill_weapon_ammo(uintptr_t ped, uint32_t weapon_hash, int ammo) {
+        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+            return false;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+        if (!handle) {
+            return false;
+        }
+
+        const uint64_t amount = static_cast<uint64_t>(static_cast<uint32_t>(ammo));
+        Core::Features::NativeCaller::InvokeNative(0x78F0424C34306220ull, { handle, static_cast<uint64_t>(weapon_hash), amount }); // ADD_AMMO_TO_PED
+        return Core::Features::NativeCaller::InvokeNative(0x14E56BC5B5DB6A19ull, { handle, static_cast<uint64_t>(weapon_hash), amount, 0ull }); // SET_PED_AMMO
+    }
+
     bool native_explode_ped_head(uintptr_t ped) {
         if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
@@ -6645,6 +6680,122 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         {
                             Mem.RapidFireUpdate();
                             RapidByl = false;
+                        }
+                    }
+                }
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+
+        BeginGroup();
+        {
+            widgets->child.begin(I_SWORD, "Weapon Spawner", 1, { 0, 240 ds });
+            {
+                struct WeaponEntry { const char* name; uint32_t hash; };
+                struct WeaponCategory { const char* name; std::vector<WeaponEntry> weapons; };
+
+                static const std::vector<WeaponCategory> weapon_categories = {
+                    { "Melee", {
+                        { "Dagger", 0x92A27487 }, { "Bat", 0x958A4A8F }, { "Bottle", 0xF9E6AA4B },
+                        { "Crowbar", 0x84BD7BFD }, { "Flashlight", 0x8BB05FD7 }, { "Golf Club", 0x440E4788 },
+                        { "Hammer", 0x4E875F73 }, { "Hatchet", 0xF9DCBF2D }, { "Knuckle", 0xD8DF3C3C },
+                        { "Knife", 0x99B507EA }, { "Machete", 0xDD5DF8D9 }, { "Switchblade", 0xDFE37640 },
+                        { "Nightstick", 0x678B81B1 }, { "Wrench", 0x19044EE0 }, { "Battle Axe", 0xCD274149 },
+                        { "Pool Cue", 0x94117305 }, { "Stone Hatchet", 0x3813FC08 }
+                    }},
+                    { "Pistol", {
+                        { "Pistol", 0x1B06D571 }, { "Pistol Mk2", 0xBFE256D4 }, { "Combat Pistol", 0x5EF9FEC4 },
+                        { "AP Pistol", 0x22D8FE39 }, { "Stun Gun", 0x3656C8C1 }, { "Pistol .50", 0x99AEEB3B },
+                        { "SNS Pistol", 0xBFD21232 }, { "SNS Pistol Mk2", 0x88374054 }, { "Heavy Pistol", 0xD205520E },
+                        { "Vintage Pistol", 0x83839C4 }, { "Flare Gun", 0x47757124 }, { "Marksman Pistol", 0xDC4DB296 },
+                        { "Revolver", 0xC1B3C3D1 }, { "Revolver Mk2", 0xCB96392F }, { "Double Action", 0x97EA20B8 },
+                        { "Ceramic Pistol", 0x2B5EF5EC }, { "Navy Revolver", 0x917F6C8C }
+                    }},
+                    { "Shotgun", {
+                        { "Pump Shotgun", 0x1D073A89 }, { "Pump Shotgun Mk2", 0x555AF99A }, { "Sawed-Off", 0x7846A318 },
+                        { "Assault Shotgun", 0xE284C527 }, { "Bullpup Shotgun", 0x9D61E50F }, { "Musket", 0xA89CB99E },
+                        { "Heavy Shotgun", 0x3AABBBAA }, { "Double Barrel", 0xEF951FBB }, { "Auto Shotgun", 0x12E82D3D }
+                    }},
+                    { "Submachine Gun", {
+                        { "Micro SMG", 0x13532244 }, { "SMG", 0x2BE6766B }, { "SMG Mk2", 0x78A97CD0 },
+                        { "Assault SMG", 0xEFE7E2DF }, { "Combat PDW", 0xA3D4D34 }, { "Machine Pistol", 0xDB1AA450 },
+                        { "Mini SMG", 0xBD248B55 }
+                    }},
+                    { "Machine Gun", {
+                        { "MG", 0x9D07F764 }, { "Combat MG", 0x7FD62962 }, { "Combat MG Mk2", 0xDBBD7280 },
+                        { "Gusenberg", 0x61012683 }
+                    }},
+                    { "Rifle", {
+                        { "Assault Rifle", 0xBFEFFF6D }, { "Assault Rifle Mk2", 0x394F415C }, { "Carbine Rifle", 0x83BF0278 },
+                        { "Carbine Rifle Mk2", 0xFAD1F1C9 }, { "Advanced Rifle", 0xAF113F99 }, { "Special Carbine", 0xC0A3098D },
+                        { "Special Carbine Mk2", 0x969C3D67 }, { "Bullpup Rifle", 0x7F229F94 }, { "Bullpup Rifle Mk2", 0x84D6FAFD },
+                        { "Compact Rifle", 0x624FE830 }
+                    }},
+                    { "Sniper", {
+                        { "Sniper Rifle", 0x5FC3C11 }, { "Heavy Sniper", 0xC472FE2 }, { "Heavy Sniper Mk2", 0xA914799 },
+                        { "Marksman Rifle", 0xC734385A }, { "Marksman Rifle Mk2", 0x6A6C02E0 }
+                    }},
+                    { "Explosive", {
+                        { "RPG", 0xB1CA77B1 }, { "Grenade Launcher", 0xA284510B }, { "Smoke Launcher", 0x4DD2DC56 },
+                        { "Minigun", 0x42BF8A85 }, { "Firework", 0x7F7497E5 }, { "Railgun", 0x6D544C99 },
+                        { "Homing Launcher", 0x63AB0442 }, { "Compact Launcher", 0x781FE4A }, { "Ray Minigun", 0xB62D1F67 },
+                        { "Grenade", 0x93E220BD }, { "BZ Gas", 0xA0973D5E }, { "Smoke Grenade", 0xFDBC8A50 },
+                        { "Flare", 0x497FACC3 }, { "Molotov", 0x24B17070 }, { "Sticky Bomb", 0x2C3731D9 },
+                        { "Proximity Mine", 0xAB564B93 }, { "Pipe Bomb", 0xBA45E8B8 }
+                    }}
+                };
+
+                static int spawn_category = 0;
+                static int spawn_weapon = 0;
+
+                std::vector<std::string_view> category_names;
+                for (const auto& category : weapon_categories) {
+                    category_names.push_back(category.name);
+                }
+
+                if (widgets->combo(I_SWORD, "Category", &spawn_category, category_names)) {
+                    spawn_weapon = 0;
+                }
+
+                if (spawn_category < 0 || spawn_category >= static_cast<int>(weapon_categories.size())) {
+                    spawn_category = 0;
+                }
+
+                const auto& selected_weapons = weapon_categories[spawn_category].weapons;
+                std::vector<std::string_view> weapon_names;
+                for (const auto& weapon : selected_weapons) {
+                    weapon_names.push_back(weapon.name);
+                }
+
+                widgets->combo(I_SWORD, "Weapon", &spawn_weapon, weapon_names);
+
+                if (spawn_weapon < 0 || spawn_weapon >= static_cast<int>(selected_weapons.size())) {
+                    spawn_weapon = 0;
+                }
+
+                auto* spawn_ped = Core::SDK::Pointers::pLocalPlayer;
+                if (!spawn_ped) {
+                    TextDisabled("No local player.");
+                }
+                else {
+                    const uint32_t weapon_hash = selected_weapons[spawn_weapon].hash;
+
+                    if (widgets->button("Fill with Ammo", { 150 ds, 26 ds })) {
+                        if (native_fill_weapon_ammo(reinterpret_cast<uintptr_t>(spawn_ped), weapon_hash, 9999)) {
+                            NotifyManager::Send("Ammo filled", 220.0f);
+                        }
+                        else {
+                            NotifyManager::Send("Ammo native unavailable", 220.0f);
+                        }
+                    }
+                    SameLine(0, 6 ds);
+                    if (widgets->button("Spawn", { 120 ds, 26 ds })) {
+                        if (native_give_weapon(reinterpret_cast<uintptr_t>(spawn_ped), weapon_hash, 9999)) {
+                            NotifyManager::Send("Weapon spawned", 220.0f);
+                        }
+                        else {
+                            NotifyManager::Send("Weapon native unavailable", 220.0f);
                         }
                     }
                 }
