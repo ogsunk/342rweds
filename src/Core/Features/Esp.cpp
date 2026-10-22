@@ -7,6 +7,7 @@
 #include "friends.hpp"
 #include "TargetHighlight.hpp"
 #include "SunketsWareVisuals.hpp"
+#include <Core/Features/NativeCaller.hpp>
 
 namespace
 {
@@ -792,50 +793,132 @@ void Core::Features::cEsp::DrawRadar()
 		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 8.0f, min.y + 22.0f), IM_COL32(200, 200, 200, 220), "No entities in range");
 }
 
+namespace
+{
+	// Reads the real world-space point where the last fired bullet landed.
+	bool get_last_weapon_impact(uintptr_t ped, D3DXVECTOR3& impact)
+	{
+		if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable())
+			return false;
+
+		const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+		if (!handle)
+			return false;
+
+		const uintptr_t block = Mem.AllocateExecutableMemory(16);
+		if (!block)
+			return false;
+
+		Mem.Write<float>(block, 0.0f);
+		Mem.Write<float>(block + 4, 0.0f);
+		Mem.Write<float>(block + 8, 0.0f);
+
+		uint64_t result = 0;
+		// GET_PED_LAST_WEAPON_IMPACT_COORD(ped, Vector3* out)
+		Core::Features::NativeCaller::InvokeNative(0x6C4D0409BA1A2BC2ull, { handle, block }, &result);
+
+		impact.x = Mem.Read<float>(block);
+		impact.y = Mem.Read<float>(block + 4);
+		impact.z = Mem.Read<float>(block + 8);
+
+		VirtualFreeEx(Mem.ProcHandle, reinterpret_cast<LPVOID>(block), 0, MEM_RELEASE);
+		return result != 0;
+	}
+}
+
 void Core::Features::cEsp::DrawMiscEffects()
 {
 	auto* cfg = g_Config.ESP;
 	if (!cfg->BulletTracerEnabled && !cfg->ImpactMarker && !cfg->GlowEffect && !cfg->Particles)
 		return;
-	if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+
+	auto* local = Core::SDK::Pointers::pLocalPlayer;
+	if (!local)
 		return;
 
 	ImDrawList* draw = ImGui::GetBackgroundDrawList();
 	const ImVec2 aim{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowCenter.y };
+	const bool shooting = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+
+	struct tracer_t { ImVec2 from; ImVec2 to; ULONGLONG expire; };
+	static std::vector<tracer_t> tracers;
+	static ULONGLONG last_shot = 0;
+	static D3DXVECTOR3 last_impact{};
+	static bool have_last_impact = false;
+
+	const ULONGLONG now = GetTickCount64();
+	tracers.erase(std::remove_if(tracers.begin(), tracers.end(),
+		[now](const tracer_t& t) { return t.expire <= now; }), tracers.end());
+
+	ImVec2 muzzle_screen{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y };
+	{
+		const D3DXVECTOR3 muzzle = local->GetBonePosDefault(SKEL_R_Hand);
+		const D3DXVECTOR2 muzzle2 = Core::SDK::Game::WorldToScreen(muzzle);
+		if (Core::SDK::Game::IsOnScreen(muzzle2))
+			muzzle_screen = ImVec2(muzzle2.x, muzzle2.y);
+	}
+
+	// Sample the real impact point while firing (throttled), then push a tracer
+	// segment that fades out like a bullet trail.
+	if (shooting && (now - last_shot) >= 90)
+	{
+		last_shot = now;
+
+		D3DXVECTOR3 impact{};
+		ImVec2 to = aim;
+		if (get_last_weapon_impact(reinterpret_cast<uintptr_t>(local), impact))
+		{
+			const D3DXVECTOR2 impact2 = Core::SDK::Game::WorldToScreen(impact);
+			if (Core::SDK::Game::IsOnScreen(impact2))
+			{
+				to = ImVec2(impact2.x, impact2.y);
+				last_impact = impact;
+				have_last_impact = true;
+			}
+		}
+
+		tracers.push_back({ muzzle_screen, to, now + 260 });
+	}
 
 	if (cfg->BulletTracerEnabled)
 	{
-		ImVec2 from{ g_Variables.g_vGameWindowCenter.x, g_Variables.g_vGameWindowSize.y };
-		auto* local = Core::SDK::Pointers::pLocalPlayer;
-		if (local)
+		for (const auto& t : tracers)
 		{
-			const D3DXVECTOR3 muzzle = local->GetBonePosDefault(SKEL_R_Hand);
-			const D3DXVECTOR2 screen = Core::SDK::Game::WorldToScreen(muzzle);
-			if (Core::SDK::Game::IsOnScreen(screen))
-				from = ImVec2(screen.x, screen.y);
+			const float life = static_cast<float>(t.expire > now ? t.expire - now : 0) / 260.0f;
+			ImVec4 color = cfg->BulletTracerCol.Value;
+			color.w *= std::clamp(life, 0.0f, 1.0f);
+			const ImU32 packed = ImGui::GetColorU32(color);
+			draw->AddLine(t.from, t.to, packed, 2.0f);
+			draw->AddCircleFilled(t.to, 2.5f, packed, 8);
 		}
-		draw->AddLine(from, aim, cfg->BulletTracerCol, 2.0f);
-		draw->AddCircleFilled(from, 3.0f, cfg->BulletTracerCol, 8);
 	}
 
-	if (cfg->ImpactMarker)
+	ImVec2 fx = aim;
+	if (have_last_impact)
 	{
-		draw->AddCircle(aim, 9.0f, cfg->ImpactMarkerCol, 16, 1.5f);
-		draw->AddLine(ImVec2(aim.x - 12.0f, aim.y), ImVec2(aim.x + 12.0f, aim.y), cfg->ImpactMarkerCol, 1.5f);
-		draw->AddLine(ImVec2(aim.x, aim.y - 12.0f), ImVec2(aim.x, aim.y + 12.0f), cfg->ImpactMarkerCol, 1.5f);
+		const D3DXVECTOR2 impact2 = Core::SDK::Game::WorldToScreen(last_impact);
+		if (Core::SDK::Game::IsOnScreen(impact2))
+			fx = ImVec2(impact2.x, impact2.y);
 	}
 
-	if (cfg->GlowEffect)
+	if (cfg->ImpactMarker && shooting)
+	{
+		draw->AddCircle(fx, 9.0f, cfg->ImpactMarkerCol, 16, 1.5f);
+		draw->AddLine(ImVec2(fx.x - 12.0f, fx.y), ImVec2(fx.x + 12.0f, fx.y), cfg->ImpactMarkerCol, 1.5f);
+		draw->AddLine(ImVec2(fx.x, fx.y - 12.0f), ImVec2(fx.x, fx.y + 12.0f), cfg->ImpactMarkerCol, 1.5f);
+	}
+
+	if (cfg->GlowEffect && shooting)
 	{
 		for (int i = 8; i >= 1; --i)
 		{
 			ImVec4 glow = cfg->GlowEffectCol.Value;
 			glow.w *= 0.06f;
-			draw->AddCircleFilled(aim, 4.0f + static_cast<float>(i) * 3.0f, ImGui::GetColorU32(glow), 24);
+			draw->AddCircleFilled(fx, 4.0f + static_cast<float>(i) * 3.0f, ImGui::GetColorU32(glow), 24);
 		}
 	}
 
-	if (cfg->Particles)
+	if (cfg->Particles && shooting)
 	{
 		static float phase = 0.0f;
 		phase += ImGui::GetIO().DeltaTime;
@@ -843,7 +926,7 @@ void Core::Features::cEsp::DrawMiscEffects()
 		{
 			const float angle = phase * 3.0f + static_cast<float>(i) * 0.628f;
 			const float radius = 8.0f + std::fmod(phase * 45.0f + static_cast<float>(i) * 7.0f, 34.0f);
-			const ImVec2 p{ aim.x + std::cos(angle) * radius, aim.y + std::sin(angle) * radius };
+			const ImVec2 p{ fx.x + std::cos(angle) * radius, fx.y + std::sin(angle) * radius };
 			draw->AddCircleFilled(p, 1.8f, cfg->ParticlesCol, 8);
 		}
 	}
