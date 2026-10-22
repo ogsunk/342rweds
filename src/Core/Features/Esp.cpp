@@ -664,11 +664,12 @@ void Core::Features::cEsp::Draw()
 {
 	auto Cfg = g_Config.ESP;
 
-	if (!Cfg->Enabled)
-		return;
-
+	// Radar and Misc ESP are independent of the ESP master toggle.
 	draw_radar_overlay();
 	draw_misc_effects();
+
+	if (!Cfg->Enabled)
+		return;
 
 	static std::unordered_map<CPed*, Core::SDK::Game::EspAnim> vEspAnimations;
 	const auto ApplyAlpha = [](ImColor color, float alphaScale) -> ImColor
