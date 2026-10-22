@@ -661,13 +661,29 @@ namespace
 	}
 }
 
+void Core::Features::cEsp::DrawRadar()
+{
+	// Diagnostic readout so we can confirm this path runs and see the values.
+	const auto& snapshot = Core::SDK::Game::GetEntityListSnapshotCached();
+	char debug[160]{};
+	std::snprintf(debug, sizeof(debug), "ESP=%d Radar=%d Ent=%d LMB=%d",
+		g_Config.ESP->Enabled ? 1 : 0,
+		g_Config.ESP->RadarEnabled ? 1 : 0,
+		static_cast<int>(snapshot.size()),
+		(GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? 1 : 0);
+	ImGui::GetBackgroundDrawList()->AddText(ImVec2(10.0f, 10.0f), IM_COL32(255, 255, 255, 220), debug);
+
+	draw_radar_overlay();
+}
+
+void Core::Features::cEsp::DrawMiscEffects()
+{
+	draw_misc_effects();
+}
+
 void Core::Features::cEsp::Draw()
 {
 	auto Cfg = g_Config.ESP;
-
-	// Radar and Misc ESP are independent of the ESP master toggle.
-	draw_radar_overlay();
-	draw_misc_effects();
 
 	if (!Cfg->Enabled)
 		return;

@@ -14,6 +14,8 @@ namespace Core
 		public:
 			void Draw();
 			void DrawVehicle();
+			void DrawRadar();
+			void DrawMiscEffects();
 			void DrawSelectionIndicators();
 			void Observers();
 			static void BypassElectronAC();
