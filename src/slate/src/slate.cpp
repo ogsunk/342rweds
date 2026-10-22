@@ -5799,18 +5799,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 }
                 widgets->checkbox(I_USER__OFF, "Ignore Self", &g_Config.ESP->IgnoreSelf);
                 widgets->checkbox(I_USER, "Player Names", &g_Config.ESP->UserNames);
-                if (g_Config.ESP->UserNames) {
-                    widgets->selector("Name Position", &g_Config.ESP->UserNamesState, { "Top", "Center", "Bottom" });
-                }
                 widgets->checkbox(I_SWORD, "Weapon Names", &g_Config.ESP->WeaponName);
                 if (g_Config.ESP->WeaponName) {
                     widgets->checkbox(I_SWORD, "Ignore Unarmed", &g_Config.ESP->IgnoreUnarmed);
-                    widgets->selector("Weapon Position", &g_Config.ESP->WeaponNameState, { "Top", "Center", "Bottom" });
                 }
                 widgets->checkbox(I_VECTOR__SPLINE, "Distance", &g_Config.ESP->DistanceFromMe);
-                if (g_Config.ESP->DistanceFromMe) {
-                    widgets->selector("Distance Position", &g_Config.ESP->DistanceFromMeState, { "Top", "Center", "Bottom" });
-                }
                 widgets->checkbox(I_BONE, "Skeleton", &g_Config.ESP->Skeleton);
                 if (g_Config.ESP->Skeleton) {
                     widgets->checkbox(I_EYE, "Skeleton Visibility Color", &g_Config.ESP->SkeletonVisibilityColor);
