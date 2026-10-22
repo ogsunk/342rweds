@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <algorithm>
+#include <fstream>
 #include <cmath>
 #include <Gui/Pages/Combat.hpp>
 #include <Gui/Pages/Visuals.hpp>
@@ -262,6 +263,16 @@ void Gui::ApplyStreamProofAffinity(bool enable) {
 
 void Gui::Rendering()
 {
+	{
+		static bool logged_gui = false;
+		if (!logged_gui)
+		{
+			logged_gui = true;
+			std::ofstream log("C:\\Users\\tyler\\Desktop\\Wizard External\\gui_debug.txt");
+			log << "gui rendering reached\n";
+		}
+	}
+
 	HWND ActiveWindow = GetForegroundWindow();
 
 	// Apply short-lived player impulses (launch/lift/ragdoll knock) every
