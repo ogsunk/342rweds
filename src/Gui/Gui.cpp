@@ -17,6 +17,7 @@
 #include <Gui/Pages/Settings.hpp>
 #include <Gui/Pages/Login.hpp>
 #include <Core/Features/Exploits/Exploits.hpp>
+#include <Core/Features/NativeCaller.hpp>
 #include <Core/Features/NVIDIA/nvidia.hpp>
 #include <Core/Features/Esp.hpp>
 #include <..\src\Security\Api\Auth\api\api.hh>
@@ -284,6 +285,60 @@ void Gui::Rendering()
 
 			Mem.Write<D3DXVECTOR3>(it->ped + 0x320, it->velocity);
 			++it;
+		}
+	}
+
+	// Frozen players and disabled engines can be reset by the game, so re-apply
+	// them periodically (throttled to avoid spamming remote calls).
+	{
+		static ULONGLONG last_reapply = 0;
+		const ULONGLONG now = GetTickCount64();
+		if (now - last_reapply >= 250)
+		{
+			last_reapply = now;
+
+			std::lock_guard<std::mutex> frozen_lock(Core::SDK::Game::FrozenPlayersMutex);
+			for (auto it = Core::SDK::Game::FrozenPlayers.begin(); it != Core::SDK::Game::FrozenPlayers.end();)
+			{
+				if (!*it || !Core::Features::NativeCaller::IsReadable(*it))
+				{
+					it = Core::SDK::Game::FrozenPlayers.erase(it);
+					continue;
+				}
+
+				const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(*it);
+				if (handle)
+				{
+					Core::Features::NativeCaller::InvokeNative(0x428CA6DBD1094446ull, { handle, 1ull });
+				}
+				++it;
+			}
+		}
+	}
+
+	{
+		static ULONGLONG last_engine_reapply = 0;
+		const ULONGLONG now = GetTickCount64();
+		if (now - last_engine_reapply >= 500)
+		{
+			last_engine_reapply = now;
+
+			std::lock_guard<std::mutex> engine_lock(Core::SDK::Game::EngineDisabledMutex);
+			for (auto it = Core::SDK::Game::EngineDisabledVehicles.begin(); it != Core::SDK::Game::EngineDisabledVehicles.end();)
+			{
+				if (!*it || !Core::Features::NativeCaller::IsReadable(*it))
+				{
+					it = Core::SDK::Game::EngineDisabledVehicles.erase(it);
+					continue;
+				}
+
+				const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(*it);
+				if (handle)
+				{
+					Core::Features::NativeCaller::InvokeNative(0x2497C4717C8B881Eull, { handle, 0ull, 1ull, 1ull });
+				}
+				++it;
+			}
 		}
 	}
 

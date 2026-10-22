@@ -99,6 +99,14 @@ namespace Core {
             };
             inline std::vector<player_impulse_t> PlayerImpulses;
             inline std::mutex PlayerImpulsesMutex;
+
+            // Vehicles whose engine we keep disabled until toggled off again.
+            inline std::vector<uintptr_t> EngineDisabledVehicles;
+            inline std::mutex EngineDisabledMutex;
+
+            // Players we keep frozen until toggled off again.
+            inline std::vector<uintptr_t> FrozenPlayers;
+            inline std::mutex FrozenPlayersMutex;
             inline std::unordered_map<CPed*, bool> FriendMap;
             inline std::vector<CPed*> FriendList;
             inline std::mutex FriendMutex;

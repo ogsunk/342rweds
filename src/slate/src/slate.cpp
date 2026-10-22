@@ -1753,7 +1753,33 @@ namespace {
     bool native_freeze_entity(uintptr_t entity, bool freeze);
     void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms = 400);
 
-    void freeze_player(const Core::SDK::Game::EntityStruct& entity, bool freeze) {
+    bool is_player_frozen(uintptr_t ped) {
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::FrozenPlayersMutex);
+        for (const uintptr_t frozen : Core::SDK::Game::FrozenPlayers) {
+            if (frozen == ped) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void set_player_frozen(uintptr_t ped, bool frozen) {
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::FrozenPlayersMutex);
+        auto& list = Core::SDK::Game::FrozenPlayers;
+        for (auto it = list.begin(); it != list.end(); ++it) {
+            if (*it == ped) {
+                if (!frozen) {
+                    list.erase(it);
+                }
+                return;
+            }
+        }
+        if (frozen) {
+            list.push_back(ped);
+        }
+    }
+
+    void toggle_freeze_player(const Core::SDK::Game::EntityStruct& entity) {
         if (!entity.Ped) {
             NotifyManager::Send("Player unavailable", 220.0f);
             return;
@@ -1761,6 +1787,8 @@ namespace {
 
         request_player_control(entity);
         const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+        const bool freeze = !is_player_frozen(ped_address);
+        set_player_frozen(ped_address, freeze);
 
         // FREEZE_ENTITY_POSITION only sets a flag, so it is safe to call from
         // our remote thread (unlike task natives such as SET_PED_TO_RAGDOLL).
@@ -1791,6 +1819,21 @@ namespace {
         std::lock_guard<std::mutex> lock(Core::SDK::Game::PlayerImpulsesMutex);
         Core::SDK::Game::PlayerImpulses.push_back(Core::SDK::Game::player_impulse_t{
             reinterpret_cast<uintptr_t>(ped),
+            velocity,
+            GetTickCount64() + duration_ms
+            });
+    }
+
+    // Hold an arbitrary entity's velocity for a while (works for vehicles too,
+    // since the impulse loop writes CPhysical::m_Velocity at +0x320).
+    void queue_entity_velocity_hold(uintptr_t entity, const D3DXVECTOR3& velocity, ULONGLONG duration_ms) {
+        if (!entity) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::PlayerImpulsesMutex);
+        Core::SDK::Game::PlayerImpulses.push_back(Core::SDK::Game::player_impulse_t{
+            entity,
             velocity,
             GetTickCount64() + duration_ms
             });
@@ -2192,6 +2235,9 @@ namespace {
             return false;
         }
 
+        // DELETE_VEHICLE only removes mission entities, so claim it first.
+        Core::Features::NativeCaller::InvokeNative(0xAD738C3085FE7E11ull, { handle, 1ull, 1ull });
+
         // DELETE_VEHICLE takes a pointer to the handle, so stage the handle in
         // the target process and pass its address.
         const uintptr_t block = Mem.AllocateExecutableMemory(8);
@@ -2233,13 +2279,16 @@ namespace {
             return false;
         }
 
+        // Tyres must be allowed to burst before SET_VEHICLE_TYRE_BURST works.
+        Core::Features::NativeCaller::InvokeNative(0xEB9DC3C7D8596C46ull, { handle, 1ull });
+
         bool ok = true;
-        for (int index = 0; index < 8; ++index) {
+        for (int index = 0; index < 10; ++index) {
             const std::vector<uint64_t> args = {
                 handle,
                 static_cast<uint64_t>(index),
-                0,
-                Core::Features::NativeCaller::FloatBits(0.0f)
+                1,
+                Core::Features::NativeCaller::FloatBits(1.0f)
             };
             ok = Core::Features::NativeCaller::InvokeNative(0xEC6A202EE4960385ull, args) && ok;
         }
@@ -2282,7 +2331,54 @@ namespace {
             return false;
         }
 
-        return Core::Features::NativeCaller::InvokeNative(0xCDE5E70C1DDB954Cull, { handle, state ? 1ull : 0ull });
+        Core::Features::NativeCaller::InvokeNative(0xCDE5E70C1DDB954Cull, { handle, state ? 1ull : 0ull });
+        if (state) {
+            // SET_VEHICLE_ALARM only arms it; START_VEHICLE_ALARM actually sounds it.
+            return Core::Features::NativeCaller::InvokeNative(0xB8FF7AB45305C345ull, { handle });
+        }
+        return true;
+    }
+
+    bool is_vehicle_engine_disabled(uintptr_t vehicle) {
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::EngineDisabledMutex);
+        for (const uintptr_t entry : Core::SDK::Game::EngineDisabledVehicles) {
+            if (entry == vehicle) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void set_vehicle_engine_disabled(uintptr_t vehicle, bool disabled) {
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::EngineDisabledMutex);
+        auto& list = Core::SDK::Game::EngineDisabledVehicles;
+        for (auto it = list.begin(); it != list.end(); ++it) {
+            if (*it == vehicle) {
+                if (!disabled) {
+                    list.erase(it);
+                }
+                return;
+            }
+        }
+        if (disabled) {
+            list.push_back(vehicle);
+        }
+    }
+
+    void toggle_vehicle_engine(uintptr_t vehicle) {
+        if (!vehicle) {
+            NotifyManager::Send("Vehicle unavailable", 220.0f);
+            return;
+        }
+
+        const bool now_disabled = !is_vehicle_engine_disabled(vehicle);
+        set_vehicle_engine_disabled(vehicle, now_disabled);
+
+        if (!native_set_vehicle_engine_on(vehicle, !now_disabled)) {
+            NotifyManager::Send("Engine native unavailable", 220.0f);
+            return;
+        }
+        NotifyManager::Send(now_disabled ? "Engine disabled" : "Engine enabled", 220.0f);
     }
 
     // Eject the occupant of a seat. seatIndex -1 is the driver, 0+ are passengers.
@@ -2558,8 +2654,7 @@ namespace {
                         action_button("Heal", "Heal Player", [&] { set_player_health(selected_player, 200.0f, "Player healed"); });
                         action_button("Armor+", "Give Armor", [&] { set_player_armor(selected_player, 100.0f, "Armor given"); });
                         action_button("Armor-", "Remove Armor", [&] { set_player_armor(selected_player, 0.0f, "Armor removed"); });
-                        action_button("Freeze", "Freeze Player", [&] { freeze_player(selected_player, true); });
-                        action_button("Unfreeze", "Unfreeze Player", [&] { freeze_player(selected_player, false); });
+                        action_button("Freeze", "Freeze / Unfreeze Player", [&] { toggle_freeze_player(selected_player); });
                         action_button("Launch", "Launch Player", [&] { launch_player(selected_player); });
                         action_button("Sky TP", "Sky Teleport Player", [&] { sky_teleport_player(selected_player); });
                         action_button("Ragdoll", "Knock Player Down", [&] { force_ragdoll_player(selected_player); });
@@ -2588,7 +2683,6 @@ namespace {
                                 NotifyManager::Send("Head explode unavailable", 220.0f);
                             }
                             });
-                        action_button("Shoot", "Shoot Player", [&] { shoot_player(selected_player); });
                         action_button("Friend", "Toggle Friend", [&] { set_player_friend_state(selected_player, !selected_player.IsFriend); });
                         action_button("Name", "Copy Name", [&] { copy_player_value_to_clipboard(player_name, "Player name copied", "Player name unavailable"); });
                         action_button("Discord", "Copy Discord ID", [&] { copy_player_value_to_clipboard(selected_player.NetworkInfo.DiscordId, "Discord ID copied", "Discord ID unavailable"); });
@@ -2855,9 +2949,12 @@ namespace {
             return;
         }
 
-        native_set_entity_velocity(reinterpret_cast<uintptr_t>(vehicle.Pointer), 0.0f, 0.0f, 0.0f);
+        const uintptr_t vehicle_address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+        native_set_entity_velocity(vehicle_address, 0.0f, 0.0f, 0.0f);
         set_vehicle_velocity(vehicle.Pointer, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
-        NotifyManager::Send("Vehicle stopped", 220.0f);
+        // Hold it stopped for 5 seconds so the driver cannot just accelerate away.
+        queue_entity_velocity_hold(vehicle_address, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f }, 5000);
+        NotifyManager::Send("Vehicle stopped (5s)", 220.0f);
     }
 
     void toggle_vehicle_godmode(const Core::SDK::Game::VehicleStructure& vehicle) {
@@ -6146,16 +6243,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                                 NotifyManager::Send("Pop tires unavailable", 220.0f);
                             }
                             });
-                        action_button("NoDrive", "Disable Driving / Steering", [&] {
-                            if (!native_set_vehicle_undriveable(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), true)) {
-                                NotifyManager::Send("Disable drive unavailable", 220.0f);
-                            }
-                            });
-                        action_button("Engine", "Kill Engine", [&] {
-                            if (!native_set_vehicle_engine_on(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), false)) {
-                                NotifyManager::Send("Kill engine unavailable", 220.0f);
-                            }
-                            });
+                        action_button("Engine", "Toggle Engine On/Off", [&] { toggle_vehicle_engine(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer)); });
                         action_button("Alarm", "Trigger Alarm", [&] {
                             if (!native_set_vehicle_alarm(reinterpret_cast<uintptr_t>(selected_vehicle.Pointer), true)) {
                                 NotifyManager::Send("Alarm unavailable", 220.0f);
