@@ -1922,7 +1922,7 @@ namespace {
     }
 
     bool native_burn_player(const Core::SDK::Game::EntityStruct& entity) {
-        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity.Ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -1935,7 +1935,7 @@ namespace {
     }
 
     bool native_explode_player(const Core::SDK::Game::EntityStruct& entity) {
-        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity.Ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -1955,7 +1955,7 @@ namespace {
     }
 
     bool native_damage_player(const Core::SDK::Game::EntityStruct& entity, float damage) {
-        if (!entity.Ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity.Ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -1974,7 +1974,7 @@ namespace {
     }
 
     bool native_set_entity_velocity(uintptr_t entity, float x, float y, float z) {
-        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -1993,7 +1993,7 @@ namespace {
     }
 
     bool native_freeze_entity(uintptr_t entity, bool freeze) {
-        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2006,7 +2006,7 @@ namespace {
     }
 
     bool native_set_entity_coords(uintptr_t entity, float x, float y, float z) {
-        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2026,7 +2026,7 @@ namespace {
     }
 
     bool native_attach_entity_to_entity(uintptr_t child, uintptr_t parent) {
-        if (!child || !parent || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!child || !parent || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2046,7 +2046,7 @@ namespace {
     }
 
     bool native_set_entity_health(uintptr_t entity, int health) {
-        if (!entity || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!entity || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2059,7 +2059,7 @@ namespace {
     }
 
     bool native_set_ped_armour(uintptr_t ped, int amount) {
-        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2072,7 +2072,7 @@ namespace {
     }
 
     bool native_give_weapon(uintptr_t ped, uint32_t weapon_hash, int ammo) {
-        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2092,7 +2092,7 @@ namespace {
     }
 
     bool native_fill_weapon_ammo(uintptr_t ped, uint32_t weapon_hash, int ammo) {
-        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2106,8 +2106,71 @@ namespace {
         return Core::Features::NativeCaller::InvokeNative(0x14E56BC5B5DB6A19ull, { handle, static_cast<uint64_t>(weapon_hash), amount, 0ull }); // SET_PED_AMMO
     }
 
+    void give_all_weapons() {
+        auto* ped = Core::SDK::Pointers::pLocalPlayer;
+        if (!ped) {
+            NotifyManager::Send("Local player unavailable", 220.0f);
+            return;
+        }
+
+        static const uint32_t hashes[] = {
+            0x1B06D571, 0x5EF9FEC4, 0x2BE6766B, 0x13532244, 0xBFEFFF6D, 0x83BF0278,
+            0x1D073A89, 0xE284C527, 0x05FC3C11, 0x0C472FE2, 0xB1CA77B1, 0x42BF8A85,
+            0x2C3731D9, 0x93E220BD, 0x24B17070, 0x99B507EA
+        };
+
+        int given = 0;
+        for (const uint32_t hash : hashes) {
+            if (native_give_weapon(reinterpret_cast<uintptr_t>(ped), hash, 9999)) {
+                ++given;
+            }
+        }
+        NotifyManager::Send("Weapons given: " + std::to_string(given), 260.0f);
+    }
+
+    void remove_all_weapons() {
+        auto* ped = Core::SDK::Pointers::pLocalPlayer;
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
+            NotifyManager::Send("Native unavailable", 220.0f);
+            return;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(ped));
+        if (!handle) {
+            return;
+        }
+        Core::Features::NativeCaller::InvokeNative(0xF25DF915FA38C5F3ull, { handle, 1ull });
+        NotifyManager::Send("Weapons removed", 220.0f);
+    }
+
+    void set_weapon_infinite_ammo(bool enabled) {
+        auto* ped = Core::SDK::Pointers::pLocalPlayer;
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
+            return;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(ped));
+        if (!handle) {
+            return;
+        }
+        Core::Features::NativeCaller::InvokeNative(0x3EDCB0505123623Bull, { handle, enabled ? 1ull : 0ull, 0ull });
+    }
+
+    void set_weapon_infinite_clip(bool enabled) {
+        auto* ped = Core::SDK::Pointers::pLocalPlayer;
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
+            return;
+        }
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(ped));
+        if (!handle) {
+            return;
+        }
+        Core::Features::NativeCaller::InvokeNative(0x183DADC6AA953186ull, { handle, enabled ? 1ull : 0ull });
+    }
+
     bool native_explode_ped_head(uintptr_t ped) {
-        if (!ped || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!ped || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2177,7 +2240,7 @@ namespace {
     // ---- Vehicle natives -------------------------------------------------
 
     bool native_delete_vehicle(uintptr_t vehicle) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2204,7 +2267,7 @@ namespace {
     }
 
     bool native_smash_vehicle_windows(uintptr_t vehicle) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2221,7 +2284,7 @@ namespace {
     }
 
     bool native_pop_vehicle_tires(uintptr_t vehicle) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2247,7 +2310,7 @@ namespace {
     }
 
     bool native_set_vehicle_engine_on(uintptr_t vehicle, bool on) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2260,7 +2323,7 @@ namespace {
     }
 
     bool native_set_vehicle_alarm(uintptr_t vehicle, bool state) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2321,7 +2384,7 @@ namespace {
 
     // Door ids: 0 front-left, 1 front-right, 2 rear-left, 3 rear-right, 4 hood, 5 trunk.
     bool native_break_vehicle_door(uintptr_t vehicle, int door_index) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2334,7 +2397,7 @@ namespace {
     }
 
     bool native_break_all_vehicle_doors(uintptr_t vehicle) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2352,7 +2415,7 @@ namespace {
 
     // Eject the occupant of a seat. seatIndex -1 is the driver, 0+ are passengers.
     bool native_eject_ped_from_seat(uintptr_t vehicle, int seat_index) {
-        if (!vehicle || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -2959,7 +3022,7 @@ namespace {
     }
 
     bool native_explode_vehicle(const Core::SDK::Game::VehicleStructure& vehicle) {
-        if (!vehicle.Pointer || !g_Config.General->NativeFeatures || !Core::Features::NativeCaller::IsAvailable()) {
+        if (!vehicle.Pointer || g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
             return false;
         }
 
@@ -6292,6 +6355,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (widgets->button("TP To Waypoint", { button_width, 34 ds })) {
                         teleport_to_waypoint();
                     }
+                    widgets->binder(I_COMMAND, "TP Waypoint Key", &g_Config.Player->TpWaypointKey);
                     PopStyleColor(3);
                     PopStyleVar();
 
@@ -6338,6 +6402,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (g_Config.Player->NoClipEnabled) {
                         widgets->sliderfloat(I_GRADIENTER, "NoClip Speed", &g_Config.Player->NoClipSpeed, 0.1f, 20.0f, "%.1f");
                     }
+                    widgets->binder(I_COMMAND, "NoClip Key", &g_Config.Player->NoClipKey);
 
                     bool fast_run = g_Config.Player->FastRun;
                     if (widgets->checkbox(I_SPARKLES, "Fast Run", &fast_run)) {
@@ -6655,9 +6720,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         }
                     }
 
-                    widgets->checkbox(I_DOTS, "Double Shot", &g_Config.Player->DoubleShot);
-                    TextDisabled("Double Shot has no recovered runtime implementation.");
-
                     widgets->spacing(8 ds);
                     widgets->separator();
                     widgets->spacing(8 ds);
@@ -6688,6 +6750,25 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                             Mem.RapidFireUpdate();
                             RapidByl = false;
                         }
+                    }
+
+                    widgets->spacing(8 ds);
+                    widgets->separator();
+                    widgets->spacing(8 ds);
+
+                    if (widgets->button("Give All Weapons", { GetContentRegionAvail().x, 26 ds })) {
+                        give_all_weapons();
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Remove All Weapons", { GetContentRegionAvail().x, 26 ds })) {
+                        remove_all_weapons();
+                    }
+
+                    if (widgets->checkbox(I_SWORD, "Infinite Ammo", &g_Config.Player->WeaponInfiniteAmmo)) {
+                        set_weapon_infinite_ammo(g_Config.Player->WeaponInfiniteAmmo);
+                    }
+                    if (widgets->checkbox(I_SWORD, "Infinite Clip", &g_Config.Player->WeaponInfiniteClip)) {
+                        set_weapon_infinite_clip(g_Config.Player->WeaponInfiniteClip);
                     }
                 }
             }
@@ -6789,7 +6870,9 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 else {
                     const uint32_t weapon_hash = selected_weapons[spawn_weapon].hash;
 
-                    if (widgets->button("Fill with Ammo", { 150 ds, 26 ds })) {
+                    const float spawn_gap = 6.f ds;
+                    const float spawn_button_width = (GetContentRegionAvail().x - spawn_gap) * 0.5f;
+                    if (widgets->button("Fill with Ammo", { spawn_button_width, 26 ds })) {
                         if (native_fill_weapon_ammo(reinterpret_cast<uintptr_t>(spawn_ped), weapon_hash, 9999)) {
                             NotifyManager::Send("Ammo filled", 220.0f);
                         }
@@ -6797,8 +6880,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                             NotifyManager::Send("Ammo native unavailable", 220.0f);
                         }
                     }
-                    SameLine(0, 6 ds);
-                    if (widgets->button("Spawn", { 120 ds, 26 ds })) {
+                    SameLine(0, spawn_gap);
+                    if (widgets->button("Spawn", { spawn_button_width, 26 ds })) {
                         if (native_give_weapon(reinterpret_cast<uintptr_t>(spawn_ped), weapon_hash, 9999)) {
                             NotifyManager::Send("Weapon spawned", 220.0f);
                         }
@@ -6829,28 +6912,8 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_KEYBOARD, "Keybind List", &g_Config.General->KeybindList);
                 widgets->checkbox(I_EYE__BOLT, "Notifications", &g_Config.General->Notifications);
                 widgets->checkbox(I_EYE__OFF, "Stream Proof", &g_Config.General->StreamProof); 
-                widgets->checkbox(I_EYE__BOLT, "Experiment Mode (UNSAFE!)", &g_Config.General->NativeFeatures);
-                if (widgets->button("Test Native Caller", { 180 ds, 26 ds })) {
-                    if (!g_Config.General->NativeFeatures) {
-                        NotifyManager::Send("Enable Experiment Mode first", 300.0f);
-                    }
-                    else {
-                        std::string status = Core::Features::NativeCaller::Diagnostics();
-
-                        const uintptr_t test_handler = Core::Features::NativeCaller::GetNativeHandler(0x1C99BB7B6E96D16Full);
-                        status += " | handler=";
-                        status += (test_handler ? "1" : "0");
-
-                        if (auto* local_ped = Core::SDK::Pointers::pLocalPlayer) {
-                            const uint32_t local_handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local_ped));
-                            status += " | handle=";
-                            status += std::to_string(local_handle);
-                        }
-
-                        NotifyManager::Send(status.c_str(), 900.0f);
-                    }
-                }
-                TextDisabled("Native: %s", Core::Features::NativeCaller::Diagnostics().c_str());
+                widgets->checkbox(I_SHIELD, "Safe Mode", &g_Config.General->SafeMode);
+                TextDisabled("Safe Mode disables all native-based actions.");
                 //if (widgets->checkbox(I_EYE__OFF, "Nvidia Stream Proof", &g_Config.General->NVStreamProof)) {
                 //    std::thread([&] { NvidiaProofing::Execute(g_Config.General->NVStreamProof);}).detach();
                 //}

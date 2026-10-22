@@ -100,7 +100,7 @@ namespace NotifyManager
             auto& Notify = NotifyList.at(i);
             const auto Id = Notify.GetDescription() + std::to_string(Notify.GetCreationTime());
             const bool IsWarning = Notify.GetType() == eType::Warning;
-            const std::string HeaderText = Notify.GetTitle().empty() ? (IsWarning ? "WARNING" : "SunketsWare") : Notify.GetTitle();
+            const std::string HeaderText = Notify.GetTitle().empty() ? (IsWarning ? "WARNING" : "SunketsWare Notification") : Notify.GetTitle();
             ImFont* HeaderFont = g_Variables.m_FontSmaller2 ? g_Variables.m_FontSmaller2 : g_Variables.m_FontNormal;
             ImFont* BodyFont = g_Variables.m_FontSecundary ? g_Variables.m_FontSecundary : g_Variables.m_FontNormal;
 
@@ -176,13 +176,11 @@ namespace NotifyManager
 
             const ImVec4 AccentColor = IsWarning
                 ? ImVec4(0.86f, 0.68f, 0.39f, 0.95f * NotifyAnim->second.Alpha)
-                : ImVec4(0.90f, 0.90f, 0.92f, 0.95f * NotifyAnim->second.Alpha);
-            const ImVec4 TitleColor = IsWarning
-                ? ImVec4(0.93f, 0.79f, 0.56f, 0.90f * NotifyAnim->second.Alpha)
-                : ImVec4(0.76f, 0.76f, 0.79f, 0.86f * NotifyAnim->second.Alpha);
-            const ImVec4 DescColor = ImVec4(0.91f, 0.91f, 0.93f, 0.97f * NotifyAnim->second.Alpha);
-            const ImVec4 CardColor = ImVec4(0.06f, 0.06f, 0.06f, 0.98f * NotifyAnim->second.Alpha);
-            const ImVec4 BorderColor = ImVec4(1.00f, 1.00f, 1.00f, 0.035f * NotifyAnim->second.Alpha);
+                : ImVec4(0.804f, 0.196f, 0.255f, 0.95f * NotifyAnim->second.Alpha);
+            const ImVec4 TitleColor = ImVec4(0.97f, 0.97f, 0.98f, 0.96f * NotifyAnim->second.Alpha);
+            const ImVec4 DescColor = ImVec4(0.78f, 0.78f, 0.82f, 0.97f * NotifyAnim->second.Alpha);
+            const ImVec4 CardColor = ImVec4(0.045f, 0.045f, 0.05f, 0.985f * NotifyAnim->second.Alpha);
+            const ImVec4 BorderColor = ImVec4(0.804f, 0.196f, 0.255f, 0.28f * NotifyAnim->second.Alpha);
             constexpr float NotifyRounding = 10.f;
 
             DrawList->AddRectFilled(
@@ -203,11 +201,21 @@ namespace NotifyManager
 
             const float TextStartX = NotifyPos.Min.x + PaddingX;
             const float HeaderCenterY = NotifyPos.Min.y + PaddingY + 5.f;
-            const auto DotCenter = ImVec2(TextStartX + 4.f, HeaderCenterY);
-            const auto TitlePos = ImVec2(TextStartX + 12.f, HeaderCenterY - (TitleTxtSize.y * 0.5f) - 2.f);
-            const auto DescPos = ImVec2(TextStartX, TitlePos.y + TitleTxtSize.y + 7.f);
+            const float BadgeSize = 18.f;
+            const ImVec2 BadgeMin(TextStartX, HeaderCenterY - BadgeSize * 0.5f);
+            const ImVec2 BadgeMax(BadgeMin.x + BadgeSize, BadgeMin.y + BadgeSize);
+            const auto TitlePos = ImVec2(TextStartX + BadgeSize + 8.f, HeaderCenterY - (TitleTxtSize.y * 0.5f) - 2.f);
+            const auto DescPos = ImVec2(TextStartX, TitlePos.y + TitleTxtSize.y + 8.f);
 
-            DrawList->AddCircleFilled(DotCenter, 2.5f, ImGui::GetColorU32(AccentColor), 16);
+            // SunketsWare logo badge
+            DrawList->AddRectFilled(BadgeMin, BadgeMax, ImGui::GetColorU32(AccentColor), 5.f);
+            DrawList->AddText(
+                HeaderFont,
+                HeaderFont->FontSize * 0.88f,
+                ImVec2(BadgeMin.x + 5.5f, BadgeMin.y + 1.f),
+                ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, NotifyAnim->second.Alpha)),
+                "S"
+            );
 
             DrawList->AddText(
                 HeaderFont,
@@ -243,7 +251,7 @@ namespace NotifyManager
     inline void Send(std::string Description, time_t ExpireTime)
     {
         NotifyManager::NotifyClass Notify(NotifyManager::eType::Info, ExpireTime + 1800);
-        Notify.SetTitle(xorstr("SunketsWare"));
+        Notify.SetTitle(xorstr("SunketsWare Notification"));
         Notify.SetDescription(Description);
         NotifyList.push_back(Notify);
     }

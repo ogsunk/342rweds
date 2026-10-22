@@ -402,6 +402,12 @@ void Gui::Rendering()
 				localPlayer->FreezePed(g_Config.Player->NoClipEnabled);
 			}
 
+			if (localPlayer && g_Config.Player->TpWaypointKey != 0 &&
+				(GetAsyncKeyState(g_Config.Player->TpWaypointKey) & 1))
+			{
+				g_Config.Player->TpWaypoint = true;
+			}
+
 			if (game_ready && g_Config.Player->NoClipEnabled)
 			{
 				::NoClip();

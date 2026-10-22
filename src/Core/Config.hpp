@@ -66,6 +66,7 @@ namespace Core {
 			inline static bool NVStreamProof = false;
 			inline static bool StreamProof = true;
 			inline static bool NativeFeatures = false;
+			inline static bool SafeMode = false;
 			inline static bool Notifications;
 			inline static bool VisibleCheckMode;
 			inline static bool Destruct;
@@ -367,6 +368,8 @@ namespace Core {
 			inline static bool NoReload;
 			inline static bool NoReloadEnabled;
 			inline static bool InfiniteAmmoEnabled;
+			inline static bool WeaponInfiniteAmmo = false;
+			inline static bool WeaponInfiniteClip = false;
 			inline static bool NCEnabled;
 			inline static bool Heal = false;
 			inline static bool WeaponRangeEnabled = false;
@@ -375,6 +378,7 @@ namespace Core {
 			inline static bool Armor = false;
 			inline static bool Repair = false;
 			inline static bool TpWaypoint = false;
+			inline static int TpWaypointKey = 0;
 			inline static bool ReloadOffsets = false;
 			inline static bool HandlingEditor;
 			inline static int NoClipKey;
@@ -585,6 +589,7 @@ namespace Core {
 
 			ConfigJson["General"]["StreamProof"] = General->StreamProof;
 			ConfigJson["General"]["NativeFeatures"] = General->NativeFeatures;
+			ConfigJson["General"]["SafeMode"] = General->SafeMode;
 			ConfigJson["General"]["Notifications"] = General->Notifications;
 			ConfigJson["General"]["WaterMark"] = General->WaterMark;
 			ConfigJson["General"]["AutoConfig"] = General->AutoConfig;
@@ -869,6 +874,7 @@ namespace Core {
 			PlayerCfg["Armor"] = Player->Armor;
 			PlayerCfg["Repair"] = Player->Repair;
 			PlayerCfg["TpWaypoint"] = Player->TpWaypoint;
+			PlayerCfg["TpWaypointKey"] = Player->TpWaypointKey;
 			PlayerCfg["ReloadOffsets"] = Player->ReloadOffsets;
 			PlayerCfg["HandlingEditor"] = Player->HandlingEditor;
 			PlayerCfg["NoClipKey"] = Player->NoClipKey;
@@ -952,6 +958,7 @@ namespace Core {
 				auto GeneralCfg = ConfigJson["General"];
 				General->StreamProof = GeneralCfg.value("StreamProof", General->StreamProof);
 				General->NativeFeatures = GeneralCfg.value("NativeFeatures", General->NativeFeatures);
+				General->SafeMode = GeneralCfg.value("SafeMode", General->SafeMode);
 				General->Notifications = GeneralCfg.value("Notifications", General->Notifications);
 				General->WaterMark = GeneralCfg.value("WaterMark", General->WaterMark);
 				General->AutoConfig = GeneralCfg.value("AutoConfig", General->AutoConfig);
@@ -1243,6 +1250,7 @@ namespace Core {
 				Player->Armor = PlayerCfg.value("Armor", Player->Armor);
 				Player->Repair = PlayerCfg.value("Repair", Player->Repair);
 				Player->TpWaypoint = PlayerCfg.value("TpWaypoint", Player->TpWaypoint);
+				Player->TpWaypointKey = PlayerCfg.value("TpWaypointKey", Player->TpWaypointKey);
 				Player->ReloadOffsets = PlayerCfg.value("ReloadOffsets", Player->ReloadOffsets);
 				Player->HandlingEditor = PlayerCfg.value("HandlingEditor", Player->HandlingEditor);
 				Player->NoClipKey = PlayerCfg.value("NoClipKey", Player->NoClipKey);
