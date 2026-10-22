@@ -6,6 +6,7 @@
 #include <slate.h>
 #include <Includes/ImGui/Fonts.hpp>
 #include <Includes/ImGui/Images.hpp>
+#include <Includes/SunketswareLogo.hpp>
 #include <Includes/CustomWidgets/Notify.hpp>
 #include <Core/Features/auth.hpp>
 #include <dwmapi.h>
@@ -389,6 +390,11 @@ namespace Gui
 			D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, logo_binary, sizeof(logo_binary), &Info, Pump, &g_Variables.Logo, 0);
 			//WeaponsIcons
 			//Overlay::LoadWeaponIcons( );
+		}
+
+		if (g_Variables.NotificationLogo == nullptr)
+		{
+			D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, sunketsware_logo_png, sunketsware_logo_png_len, &Info, Pump, &g_Variables.NotificationLogo, 0);
 		}
 	}
 

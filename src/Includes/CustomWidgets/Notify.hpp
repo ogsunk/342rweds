@@ -208,8 +208,11 @@ namespace NotifyManager
             const auto DescPos = ImVec2(TextStartX, TitlePos.y + TitleTxtSize.y + 8.f);
 
             // SunketsWare logo
-            if (g_Variables.Logo != nullptr) {
-                DrawList->AddImage(reinterpret_cast<ImTextureID>(g_Variables.Logo), BadgeMin, BadgeMax);
+            ID3D11ShaderResourceView* notification_logo = g_Variables.NotificationLogo != nullptr
+                ? g_Variables.NotificationLogo
+                : g_Variables.Logo;
+            if (notification_logo != nullptr) {
+                DrawList->AddImage(reinterpret_cast<ImTextureID>(notification_logo), BadgeMin, BadgeMax);
             }
             else {
                 DrawList->AddRectFilled(BadgeMin, BadgeMax, ImGui::GetColorU32(AccentColor), 5.f);
