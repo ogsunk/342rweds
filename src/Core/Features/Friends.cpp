@@ -170,46 +170,63 @@ namespace Core::Features
 
     bool cFriends::IsFriend(CPed* ped)
     {
+        if (!ped) return false;
+
         std::string name = GetFriendName(ped);
-        if (name.empty()) return false;
 
         std::lock_guard<std::mutex> lk(FriendMutex);
+        if (FriendPeds.contains(ped)) return true;
+        if (name.empty()) return false;
         return FriendNameKeys.contains(NormalizeFriendName(name));
     }
 
     void cFriends::AddFriend(CPed* ped)
     {
+        if (!ped) return;
+
         std::string name = GetFriendName(ped);
-        if (name.empty()) return;
 
         {
             std::lock_guard<std::mutex> lk(FriendMutex);
-            FriendNames.insert(name);
-            FriendNameKeys.insert(NormalizeFriendName(name));
+            // Always track the ped so the Person is marked as a friend even if
+            // their name has not resolved yet.
+            FriendPeds.insert(ped);
+            if (!name.empty())
+            {
+                FriendNames.insert(name);
+                FriendNameKeys.insert(NormalizeFriendName(name));
+            }
         }
 
-        UpdateNames::AddFriend(name);
+        if (!name.empty())
+            UpdateNames::AddFriend(name);
     }
 
     void cFriends::RemoveFriend(CPed* ped)
     {
+        if (!ped) return;
+
         std::string name = GetFriendName(ped);
-        if (name.empty()) return;
 
         {
             std::lock_guard<std::mutex> lk(FriendMutex);
-            const std::string key = NormalizeFriendName(name);
-            for (auto it = FriendNames.begin(); it != FriendNames.end();)
+            FriendPeds.erase(ped);
+            if (!name.empty())
             {
-                if (NormalizeFriendName(*it) == key)
-                    it = FriendNames.erase(it);
-                else
-                    ++it;
+                const std::string key = NormalizeFriendName(name);
+                for (auto it = FriendNames.begin(); it != FriendNames.end();)
+                {
+                    if (NormalizeFriendName(*it) == key)
+                        it = FriendNames.erase(it);
+                    else
+                        ++it;
+                }
+                FriendNameKeys.erase(key);
             }
-            FriendNameKeys.erase(key);
         }
 
-        UpdateNames::RemoveFriend(name);
+        if (!name.empty())
+            UpdateNames::RemoveFriend(name);
     }
 
     // ==================== Friend Adder Thread ====================

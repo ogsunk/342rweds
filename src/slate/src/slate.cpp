@@ -5445,7 +5445,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_VECTOR__SPLINE, "Prediction", &g_Config.Aimbot->Prediction);
                 widgets->checkbox(I_DOTS, "Legit Mode", &g_Config.Aimbot->LegitMode);
                 widgets->checkbox(I_CURRENT__LOCATION, "Sticky Aim", &g_Config.Aimbot->StickyAim);
-                widgets->checkbox(I_VECTOR__SPLINE, "Curvy Mode", &g_Config.Aimbot->CurvyMode);
                 widgets->checkbox(I_EYE__COG, "Only Visible", &g_Config.Aimbot->OnlyVisible);
                 widgets->checkbox(I_USER__COG, "Ignore NPCs", &g_Config.Aimbot->IgnoreNPCs);
                 widgets->checkbox(I_MOOD__SILENCE, "Ignore Dead", &g_Config.Aimbot->IgnoreDead);
@@ -7229,7 +7228,7 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
                     g_shadertoy->bg(GetWindowDrawList(), GetWindowPos(), GetWindowPos() + GetWindowSize(), g_style->col(pcol_backdrop), GImGui->Style.WindowRounding);
 
                     PushStyleVar(ImGuiStyleVar_WindowPadding, vec2{ 14, 14 });
-                    BeginChild("hitbox_selector_header", vec2{ 0, 40 ds }, 2, 128);
+                    BeginChild("hitbox_selector_header", vec2{ 0, 40 ds }, 2, 128 | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                     {
                         SetCursorPosY(12 ds);
                         PushFont(fonts[icons].get(16));

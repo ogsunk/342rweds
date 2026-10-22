@@ -471,6 +471,10 @@ struct vehicle_bounds_cache_entry_t
 
 void Core::Features::cEsp::DrawSelectionIndicators()
 {
+	// Only show the selected player/vehicle marker while the menu is open.
+	if (!g_MenuInfo.IsOpen)
+		return;
+
 	auto* drawList = ImGui::GetBackgroundDrawList();
 
 	const uintptr_t selectedPlayer = Core::SDK::Game::SelectedPlayer.load();

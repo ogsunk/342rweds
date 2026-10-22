@@ -14,6 +14,7 @@ namespace Core::Features
     public:
         static inline std::unordered_set<std::string> FriendNames;
         static inline std::unordered_set<std::string> FriendNameKeys;
+        static inline std::unordered_set<CPed*> FriendPeds;
         static inline std::mutex FriendMutex;
 
         static inline bool BoneGroup_Head = true;
