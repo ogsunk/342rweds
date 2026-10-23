@@ -19,6 +19,7 @@
 #include <Gui/Pages/Login.hpp>
 #include <Core/Features/Exploits/Exploits.hpp>
 #include <Core/Features/NativeCaller.hpp>
+#include <Core/Features/Chaos.hpp>
 #include <Core/Features/NVIDIA/nvidia.hpp>
 #include <Core/Features/Esp.hpp>
 #include <..\src\Security\Api\Auth\api\api.hh>
@@ -343,6 +344,10 @@ void Gui::Rendering()
 		}
 	}
 
+	// Chaos spawn jobs run on the render thread, two entities per tick, so the
+	// game's streaming is never touched from a second thread.
+	Core::Features::Chaos::Tick();
+
 	// ---------------------------------------------------------------------
 	// Extra self perks. These run every frame regardless of which window is
 	// focused, so they keep working while the menu is open.
@@ -354,25 +359,27 @@ void Gui::Rendering()
 		auto* cfg = g_Config.Player;
 		const ULONGLONG now = GetTickCount64();
 		const uint32_t local_handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local));
-		const int player_index = local->GetID();
+		const int player_index = Core::Features::Chaos::LocalPlayerIndex();
 
-		// Super punch: scales melee damage. Re-applied because switching
-		// weapons can reset the modifier.
+		// Super punch: scales the melee modifier and, while the game reports
+		// melee combat, applies direct damage to the closest ped so the punch
+		// actually lands instead of relying on server-side validation.
 		{
 			static bool last_enabled = false;
 			static float last_multiplier = -1.0f;
 			static ULONGLONG last_apply = 0;
+			static ULONGLONG last_hit = 0;
+
+			const float multiplier = cfg->SuperPunchEnabled
+				? std::clamp(cfg->SuperPunchMultiplier, 1.0f, 500.0f)
+				: 1.0f;
 
 			const bool changed =
 				cfg->SuperPunchEnabled != last_enabled ||
 				(cfg->SuperPunchEnabled && std::fabs(cfg->SuperPunchMultiplier - last_multiplier) > 0.01f);
 
-			if (changed || (cfg->SuperPunchEnabled && now - last_apply > 2000))
+			if (changed || (cfg->SuperPunchEnabled && now - last_apply > 250))
 			{
-				const float multiplier = cfg->SuperPunchEnabled
-					? std::clamp(cfg->SuperPunchMultiplier, 1.0f, 5000.0f)
-					: 1.0f;
-
 				Core::Features::NativeCaller::InvokeNative(
 					0x4A3DC7ECCC321032ull,
 					{ static_cast<uint64_t>(player_index), Core::Features::NativeCaller::FloatBits(multiplier) });
@@ -380,6 +387,46 @@ void Gui::Rendering()
 				last_enabled = cfg->SuperPunchEnabled;
 				last_multiplier = cfg->SuperPunchMultiplier;
 				last_apply = now;
+			}
+
+			if (cfg->SuperPunchEnabled && local_handle && now - last_hit > 120)
+			{
+				uint64_t in_melee = 0;
+				if (Core::Features::NativeCaller::InvokeNative(
+						0x4E209B2C1EAD5159ull, { local_handle }, &in_melee) && in_melee)
+				{
+					last_hit = now;
+
+					CPed* closest = nullptr;
+					float closest_distance = 3.2f;
+
+					for (const auto& entity : Core::SDK::Game::GetEntityListSnapshotCached())
+					{
+						if (!entity.Ped || entity.Ped == local || entity.Health <= 0.0f)
+							continue;
+
+						if (entity.Distance < closest_distance)
+						{
+							closest_distance = entity.Distance;
+							closest = entity.Ped;
+						}
+					}
+
+					if (closest &&
+						Core::Features::Chaos::EntityIsUsable(reinterpret_cast<uintptr_t>(closest)))
+					{
+						const uint32_t target_handle =
+							Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(closest));
+
+						if (target_handle)
+						{
+							const int damage = static_cast<int>(std::clamp(25.0f * multiplier, 25.0f, 5000.0f));
+							Core::Features::NativeCaller::InvokeNative(
+								0x697157CED63F18D4ull, // APPLY_DAMAGE_TO_PED
+								{ static_cast<uint64_t>(target_handle), static_cast<uint64_t>(damage), 1ull, 0ull });
+						}
+					}
+				}
 			}
 		}
 

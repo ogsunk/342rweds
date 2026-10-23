@@ -12,6 +12,7 @@
 #include "Core/features/auth.hpp"
 #include <Core/SDK/SDK.hpp>
 #include <Core/Features/NativeCaller.hpp>
+#include <Core/Features/Chaos.hpp>
 #include "includes/includes.hpp"
 #include <Includes/CustomWidgets/Notify.hpp>
 #include <Includes/CustomWidgets/Preview.hpp>
@@ -3082,46 +3083,102 @@ namespace {
 
     // ------------------------------------------------------------------
     // Chaos tab
+    //
+    // Every action is serialized, validates each entity before use, and is
+    // capped so a streamed-out pointer or a 40-car explosion chain can never
+    // take the game down.
     // ------------------------------------------------------------------
-    uint32_t joaat_hash(const char* text) {
-        uint32_t hash = 0;
-        while (*text) {
-            hash += static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(*text++)));
-            hash += hash << 10;
-            hash ^= hash >> 6;
-        }
-        hash += hash << 3;
-        hash ^= hash >> 11;
-        hash += hash << 15;
-        return hash;
-    }
+    std::mutex g_chaos_action_mutex;
 
-    bool chaos_natives_ready() {
+    struct chaos_action_guard_t {
+        bool locked = false;
+        chaos_action_guard_t() { locked = g_chaos_action_mutex.try_lock(); }
+        ~chaos_action_guard_t() { if (locked) g_chaos_action_mutex.unlock(); }
+    };
+
+    bool chaos_ready() {
         return !g_Config.General->SafeMode && Core::Features::NativeCaller::IsAvailable();
     }
 
-    bool ensure_model_loaded(uint32_t model_hash, int timeout_ms = 5000) {
-        if (!model_hash || !chaos_natives_ready()) {
-            return false;
+    std::vector<CVehicle*> chaos_nearby_vehicles(float radius, size_t limit) {
+        std::vector<CVehicle*> result;
+
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local) {
+            return result;
         }
 
-        Core::Features::NativeCaller::InvokeNative(0x963D27A58DF860ACull, { model_hash });
+        const D3DXVECTOR3 origin = local->GetPos();
 
-        const ULONGLONG start = GetTickCount64();
-        while (GetTickCount64() - start < static_cast<ULONGLONG>(timeout_ms)) {
-            uint64_t loaded = 0;
-            if (Core::Features::NativeCaller::InvokeNative(0x98A4EB5D89A0C952ull, { model_hash }, &loaded) && loaded) {
-                return true;
+        std::vector<Core::SDK::Game::VehicleStructure> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(Core::SDK::Game::VehicleMutex);
+            snapshot = Core::SDK::Game::VehicleList;
+        }
+
+        for (const auto& vehicle : snapshot) {
+            if (!vehicle.Pointer) {
+                continue;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
+                continue;
+            }
+
+            const D3DXVECTOR3 position = Mem.Read<D3DXVECTOR3>(address + 0x90);
+            const float dx = position.x - origin.x;
+            const float dy = position.y - origin.y;
+            const float dz = position.z - origin.z;
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) > radius) {
+                continue;
+            }
+
+            result.push_back(vehicle.Pointer);
+            if (result.size() >= limit) {
+                break;
+            }
         }
 
-        return false;
+        return result;
     }
 
-    std::vector<Core::SDK::Game::VehicleStructure> snapshot_vehicles() {
-        std::lock_guard<std::mutex> lock(Core::SDK::Game::VehicleMutex);
-        return Core::SDK::Game::VehicleList;
+    std::vector<CPed*> chaos_nearby_peds(float radius, size_t limit) {
+        std::vector<CPed*> result;
+
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local) {
+            return result;
+        }
+
+        const D3DXVECTOR3 origin = local->GetPos();
+        const auto& entities = Core::SDK::Game::GetEntityListSnapshotCached();
+
+        for (const auto& entity : entities) {
+            if (!entity.Ped || entity.Ped == local || entity.Health <= 0.0f) {
+                continue;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(entity.Ped);
+            if (!Core::Features::Chaos::EntityIsUsable(address)) {
+                continue;
+            }
+
+            const D3DXVECTOR3 position = Mem.Read<D3DXVECTOR3>(address + 0x90);
+            const float dx = position.x - origin.x;
+            const float dy = position.y - origin.y;
+            const float dz = position.z - origin.z;
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) > radius) {
+                continue;
+            }
+
+            result.push_back(entity.Ped);
+            if (result.size() >= limit) {
+                break;
+            }
+        }
+
+        return result;
     }
 
     void chaos_spam_cars(int count, float radius) {
@@ -3130,8 +3187,7 @@ namespace {
             NotifyManager::Send("No local player", 220.0f);
             return;
         }
-
-        if (!chaos_natives_ready()) {
+        if (!chaos_ready()) {
             NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
             return;
         }
@@ -3142,54 +3198,14 @@ namespace {
         };
 
         static std::mt19937 rng(std::random_device{}());
-        std::uniform_int_distribution<int> model_pick(
+        std::uniform_int_distribution<int> pick(
             0, static_cast<int>(sizeof(car_models) / sizeof(car_models[0])) - 1);
 
-        const uint32_t model_hash = joaat_hash(car_models[model_pick(rng)]);
-        const D3DXVECTOR3 origin = local->GetPos();
-        const int spawn_count = std::clamp(count, 1, 40);
-        const float spawn_radius = std::clamp(radius, 5.0f, 40.0f);
-
-        std::thread([spawn_count, spawn_radius, model_hash, origin] {
-            if (!ensure_model_loaded(model_hash)) {
-                return;
-            }
-
-            static std::mt19937 local_rng(std::random_device{}());
-            std::uniform_real_distribution<float> angle_dist(0.0f, 6.2831853f);
-            std::uniform_real_distribution<float> radius_dist(3.0f, spawn_radius);
-
-            for (int i = 0; i < spawn_count; ++i) {
-                const float angle = angle_dist(local_rng);
-                const float distance = radius_dist(local_rng);
-                const float x = origin.x + std::cos(angle) * distance;
-                const float y = origin.y + std::sin(angle) * distance;
-                const float z = origin.z + 0.75f;
-                const float heading = angle_dist(local_rng) * 57.29578f;
-
-                uint64_t vehicle = 0;
-                Core::Features::NativeCaller::InvokeNative(
-                    0xAF35D0D2583051B0ull,
-                    {
-                        model_hash,
-                        Core::Features::NativeCaller::FloatBits(x),
-                        Core::Features::NativeCaller::FloatBits(y),
-                        Core::Features::NativeCaller::FloatBits(z),
-                        Core::Features::NativeCaller::FloatBits(heading),
-                        1ull,
-                        0ull
-                    },
-                    &vehicle);
-
-                if (vehicle) {
-                    Core::Features::NativeCaller::InvokeNative(0x49733E92263139D1ull, { vehicle });
-                }
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(70));
-            }
-
-            Core::Features::NativeCaller::InvokeNative(0xE532F5D78798DAABull, { model_hash });
-        }).detach();
+        const uint32_t model = Core::Features::Chaos::Joaat(car_models[pick(rng)]);
+        if (!Core::Features::Chaos::StartSpawn(1, model, count, local->GetPos(), radius)) {
+            NotifyManager::Send("Another spawn is already running", 220.0f);
+            return;
+        }
 
         NotifyManager::Send("Spamming cars...", 220.0f);
     }
@@ -3200,8 +3216,7 @@ namespace {
             NotifyManager::Send("No local player", 220.0f);
             return;
         }
-
-        if (!chaos_natives_ready()) {
+        if (!chaos_ready()) {
             NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
             return;
         }
@@ -3212,115 +3227,127 @@ namespace {
         };
 
         static std::mt19937 rng(std::random_device{}());
-        std::uniform_int_distribution<int> model_pick(
+        std::uniform_int_distribution<int> pick(
             0, static_cast<int>(sizeof(ped_models) / sizeof(ped_models[0])) - 1);
 
-        const uint32_t model_hash = joaat_hash(ped_models[model_pick(rng)]);
-        const D3DXVECTOR3 origin = local->GetPos();
-        const int spawn_count = std::clamp(count, 1, 60);
-        const float spawn_radius = std::clamp(radius, 4.0f, 40.0f);
-
-        std::thread([spawn_count, spawn_radius, model_hash, origin] {
-            if (!ensure_model_loaded(model_hash)) {
-                return;
-            }
-
-            static std::mt19937 local_rng(std::random_device{}());
-            std::uniform_real_distribution<float> angle_dist(0.0f, 6.2831853f);
-            std::uniform_real_distribution<float> radius_dist(2.5f, spawn_radius);
-
-            for (int i = 0; i < spawn_count; ++i) {
-                const float angle = angle_dist(local_rng);
-                const float distance = radius_dist(local_rng);
-                const float x = origin.x + std::cos(angle) * distance;
-                const float y = origin.y + std::sin(angle) * distance;
-                const float z = origin.z + 0.5f;
-                const float heading = angle_dist(local_rng) * 57.29578f;
-
-                Core::Features::NativeCaller::InvokeNative(
-                    0xD49F9B0955C367DEull,
-                    {
-                        4ull, // civilian male
-                        model_hash,
-                        Core::Features::NativeCaller::FloatBits(x),
-                        Core::Features::NativeCaller::FloatBits(y),
-                        Core::Features::NativeCaller::FloatBits(z),
-                        Core::Features::NativeCaller::FloatBits(heading),
-                        1ull,
-                        0ull
-                    });
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(60));
-            }
-
-            Core::Features::NativeCaller::InvokeNative(0xE532F5D78798DAABull, { model_hash });
-        }).detach();
+        const uint32_t model = Core::Features::Chaos::Joaat(ped_models[pick(rng)]);
+        if (!Core::Features::Chaos::StartSpawn(2, model, count, local->GetPos(), radius)) {
+            NotifyManager::Send("Another spawn is already running", 220.0f);
+            return;
+        }
 
         NotifyManager::Send("Spamming peds...", 220.0f);
     }
 
+    // Clears every ragdoll blocker and physically tips the ped over. Task
+    // natives (SET_PED_TO_RAGDOLL) need the game's script thread and crash when
+    // called from our remote thread, so this is the safe equivalent.
+    void chaos_knock_ped(CPed* ped, float lift) {
+        if (!ped) {
+            return;
+        }
+
+        const uintptr_t address = reinterpret_cast<uintptr_t>(ped);
+        if (!Core::Features::Chaos::EntityIsUsable(address)) {
+            return;
+        }
+
+        ped->NoRagDoll(false);
+        ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
+        ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromAnyPedImpact, false);
+        ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromMelee, false);
+        ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromBulletImpact, false);
+        ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromVehicleImpact, false);
+
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_real_distribution<float> lateral(-3.5f, 3.5f);
+
+        D3DXVECTOR3 velocity = Mem.Read<D3DXVECTOR3>(address + 0x320);
+        velocity.x += lateral(rng);
+        velocity.y += lateral(rng);
+        velocity.z += lift;
+
+        Mem.Write<D3DXVECTOR3>(address + 0x320, velocity);
+        queue_entity_velocity_hold(address, velocity, 500);
+
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(address);
+        if (handle) {
+            Core::Features::NativeCaller::InvokeNative(
+                0xB128377056A54E2Aull, { handle, 0ull }); // SET_PED_CAN_RAGDOLL(false)
+        }
+    }
+
     bool taze_ped(uintptr_t ped_address) {
-        if (!ped_address || !chaos_natives_ready()) {
+        if (!ped_address || !chaos_ready()) {
+            return false;
+        }
+        if (!Core::Features::Chaos::EntityIsUsable(ped_address)) {
             return false;
         }
 
         auto* ped = reinterpret_cast<CPed*>(ped_address);
-        D3DXVECTOR3 target = ped->GetPos();
-        target.z += 0.35f;
+        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped_address);
+        if (!handle) {
+            return false;
+        }
 
+        const uint32_t stun_weapon = Core::Features::Chaos::Joaat("weapon_stungun");
+
+        // Stungun damage reaction: this is what actually tazes the ped.
+        Core::Features::NativeCaller::InvokeNative(
+            0x697157CED63F18D4ull, // APPLY_DAMAGE_TO_PED
+            { static_cast<uint64_t>(handle), 5ull, 1ull, static_cast<uint64_t>(stun_weapon) });
+
+        // Physical reaction, guaranteed even if the server rejects the damage.
+        chaos_knock_ped(ped, 6.0f);
+
+        // Visual electric hit. Fired from above the target so cover cannot
+        // swallow the projectile.
+        D3DXVECTOR3 target = Mem.Read<D3DXVECTOR3>(ped_address + 0x90);
         D3DXVECTOR3 start = target;
-        start.z += 2.2f;
+        start.z += 2.0f;
 
         auto* local = Core::SDK::Pointers::pLocalPlayer;
-        const uint32_t owner_handle = local
+        const uint32_t owner = local
             ? Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local))
             : 0;
 
-        const uint32_t stungun_hash = joaat_hash("weapon_stungun");
+        Core::Features::NativeCaller::InvokeNative(
+            0x867654CBC7606F2Cull, // SHOOT_SINGLE_BULLET_BETWEEN_COORDS
+            {
+                Core::Features::NativeCaller::FloatBits(start.x),
+                Core::Features::NativeCaller::FloatBits(start.y),
+                Core::Features::NativeCaller::FloatBits(start.z),
+                Core::Features::NativeCaller::FloatBits(target.x),
+                Core::Features::NativeCaller::FloatBits(target.y),
+                Core::Features::NativeCaller::FloatBits(target.z),
+                1ull,
+                static_cast<uint64_t>(stun_weapon),
+                static_cast<uint64_t>(owner),
+                0ull,
+                1ull,
+                0ull,
+                Core::Features::NativeCaller::FloatBits(2.0f)
+            });
 
-        const std::vector<uint64_t> args = {
-            Core::Features::NativeCaller::FloatBits(start.x),
-            Core::Features::NativeCaller::FloatBits(start.y),
-            Core::Features::NativeCaller::FloatBits(start.z),
-            Core::Features::NativeCaller::FloatBits(target.x),
-            Core::Features::NativeCaller::FloatBits(target.y),
-            Core::Features::NativeCaller::FloatBits(target.z),
-            1ull,                       // damage
-            static_cast<uint64_t>(stungun_hash),
-            static_cast<uint64_t>(owner_handle),
-            0ull,                       // isAudible
-            1ull,                       // isInvisible
-            0ull,                       // isP2P
-            Core::Features::NativeCaller::FloatBits(2.0f)
-        };
-
-        return Core::Features::NativeCaller::InvokeNative(0x867654CBC7606F2Cull, args);
+        return true;
     }
 
     void chaos_taze_everyone(float radius) {
-        auto* local = Core::SDK::Pointers::pLocalPlayer;
-        if (!local || !chaos_natives_ready()) {
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
+        if (!chaos_ready()) {
             NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
             return;
         }
 
-        const auto& entities = Core::SDK::Game::GetEntityListSnapshotCached();
         int affected = 0;
-
-        for (const auto& entity : entities) {
-            if (!entity.Ped || entity.Ped == local) {
-                continue;
-            }
-            if (entity.Distance > std::clamp(radius, 5.0f, 60.0f)) {
-                continue;
-            }
-            if (affected >= 20) {
-                break;
-            }
-
-            if (taze_ped(reinterpret_cast<uintptr_t>(entity.Ped))) {
+        for (CPed* ped : chaos_nearby_peds(std::clamp(radius, 5.0f, 60.0f), 12)) {
+            if (taze_ped(reinterpret_cast<uintptr_t>(ped))) {
                 ++affected;
-                std::this_thread::sleep_for(std::chrono::milliseconds(25));
             }
         }
 
@@ -3328,46 +3355,19 @@ namespace {
     }
 
     void chaos_ragdoll_everyone(float radius) {
-        auto* local = Core::SDK::Pointers::pLocalPlayer;
-        if (!local) {
-            NotifyManager::Send("No local player", 220.0f);
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
             return;
         }
 
-        const auto& entities = Core::SDK::Game::GetEntityListSnapshotCached();
         int affected = 0;
-
-        for (const auto& entity : entities) {
-            if (!entity.Ped || entity.Ped == local) {
+        for (CPed* ped : chaos_nearby_peds(std::clamp(radius, 5.0f, 60.0f), 20)) {
+            if (!Core::Features::Chaos::EntityIsUsable(reinterpret_cast<uintptr_t>(ped))) {
                 continue;
             }
-            if (entity.Distance > std::clamp(radius, 5.0f, 60.0f)) {
-                continue;
-            }
-            if (affected >= 30) {
-                break;
-            }
 
-            const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
-
-            // Task natives crash off-thread, so clear the ragdoll blockers
-            // and knock the ped over physically instead.
-            entity.Ped->NoRagDoll(false);
-            entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
-            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromAnyPedImpact, false);
-            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromMelee, false);
-            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromBulletImpact, false);
-
-            static std::mt19937 rng(std::random_device{}());
-            std::uniform_real_distribution<float> dist(-4.0f, 4.0f);
-
-            D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
-            velocity.x += dist(rng);
-            velocity.y += dist(rng);
-            velocity.z += 8.0f;
-
-            Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
-            queue_entity_velocity_hold(ped_address, velocity, 350);
+            chaos_knock_ped(ped, 8.0f);
             ++affected;
         }
 
@@ -3375,45 +3375,57 @@ namespace {
     }
 
     void chaos_destroy_cars(float radius) {
-        int affected = 0;
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
 
-        for (const auto& vehicle : snapshot_vehicles()) {
-            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+        int affected = 0;
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
             }
-            if (affected >= 40) {
-                break;
-            }
 
-            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            // Engine only: zeroing body/petrol health too would turn this into
+            // a 20-car explosion chain and tank the frame rate.
             if (g_Offsets.m_VehicleEngineHealth) {
                 Mem.Write<float>(address + g_Offsets.m_VehicleEngineHealth, -4000.0f);
             }
-            if (g_Offsets.m_VehicleBodyHealth) {
-                Mem.Write<float>(address + g_Offsets.m_VehicleBodyHealth, 0.0f);
-            }
+
             ++affected;
         }
 
-        NotifyManager::Send("Destroyed " + std::to_string(affected) + " cars", 220.0f);
+        NotifyManager::Send("Destroyed " + std::to_string(affected) + " car engines", 220.0f);
     }
 
     void chaos_freeze_cars(float radius) {
-        int affected = 0;
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
+        if (!chaos_ready()) {
+            NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
+            return;
+        }
 
-        for (const auto& vehicle : snapshot_vehicles()) {
-            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+        int affected = 0;
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
             }
-            if (affected >= 25) {
-                break;
+
+            const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(address);
+            if (!handle) {
+                continue;
             }
 
-            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
             Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
-            if (!native_freeze_entity(address, true)) {
-                Mem.Write<uint8_t>(address + 0x2E, 1);
-            }
+            Core::Features::NativeCaller::InvokeNative(
+                0x428CA6DBD1094446ull, { handle, 1ull }); // FREEZE_ENTITY_POSITION
             ++affected;
         }
 
@@ -3421,22 +3433,28 @@ namespace {
     }
 
     void chaos_void_cars(float radius) {
-        int affected = 0;
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
 
-        for (const auto& vehicle : snapshot_vehicles()) {
-            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+        int affected = 0;
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
             }
-            if (affected >= 25) {
-                break;
+
+            // Never move an occupied car: that desyncs the driver and is the
+            // most common way this action used to crash.
+            if (vehicle->GetDriver()) {
+                continue;
             }
 
-            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
-            D3DXVECTOR3 position = vehicle.Pointer->GetPos();
-            position.z = -250.0f;
-
-            vehicle.Pointer->Fix(0);
-            vehicle.Pointer->SetPos(position);
+            D3DXVECTOR3 position = Mem.Read<D3DXVECTOR3>(address + 0x90);
+            position.z = -200.0f;
+            Mem.Write<D3DXVECTOR3>(address + 0x90, position);
             Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
             ++affected;
         }
@@ -3445,17 +3463,19 @@ namespace {
     }
 
     void chaos_flip_cars(float radius) {
-        int affected = 0;
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
 
-        for (const auto& vehicle : snapshot_vehicles()) {
-            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+        int affected = 0;
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
             }
-            if (affected >= 25) {
-                break;
-            }
 
-            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
             D3DXMATRIX matrix = Mem.Read<D3DXMATRIX>(address + 0x60);
 
             // 180-degree roll around the forward axis.
@@ -3466,7 +3486,7 @@ namespace {
             matrix._32 = -matrix._32;
             matrix._33 = -matrix._33;
 
-            D3DXVECTOR3 position = vehicle.Pointer->GetPos();
+            D3DXVECTOR3 position = Mem.Read<D3DXVECTOR3>(address + 0x90);
             position.z += 2.5f;
             matrix._41 = position.x;
             matrix._42 = position.y;
@@ -3474,7 +3494,7 @@ namespace {
             matrix._44 = 1.0f;
 
             Mem.Write<D3DXMATRIX>(address + 0x60, matrix);
-            vehicle.Pointer->Fix(1000.0f);
+            vehicle->Fix(1000.0f);
             Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
             ++affected;
         }
@@ -3483,26 +3503,40 @@ namespace {
     }
 
     void chaos_launch_cars(float radius) {
-        int affected = 0;
+        chaos_action_guard_t guard;
+        if (!guard.locked) {
+            NotifyManager::Send("Chaos action already running", 220.0f);
+            return;
+        }
 
         static std::mt19937 rng(std::random_device{}());
         std::uniform_real_distribution<float> lateral(-10.0f, 10.0f);
 
-        for (const auto& vehicle : snapshot_vehicles()) {
-            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+        int affected = 0;
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 15)) {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
+            if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
             }
-            if (affected >= 15) {
-                break;
-            }
 
-            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
             const D3DXVECTOR3 velocity{ lateral(rng), lateral(rng), 32.0f };
 
             Mem.Write<uint8_t>(address + 0x2E, 0);
             Mem.Write<D3DXVECTOR3>(address + 0x320, velocity);
             queue_entity_velocity_hold(address, velocity, 350);
-            native_set_entity_velocity(address, velocity.x, velocity.y, velocity.z);
+
+            const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(address);
+            if (handle) {
+                Core::Features::NativeCaller::InvokeNative(
+                    0x1C99BB7B6E96D16Full, // SET_ENTITY_VELOCITY
+                    {
+                        handle,
+                        Core::Features::NativeCaller::FloatBits(velocity.x),
+                        Core::Features::NativeCaller::FloatBits(velocity.y),
+                        Core::Features::NativeCaller::FloatBits(velocity.z)
+                    });
+            }
+
             ++affected;
         }
 
@@ -7222,57 +7256,131 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         {
             widgets->child.begin(I_SWORD, "Weapon Spawner", 2, { weapon_column_width, 312 ds });
             {
-                struct WeaponEntry { const char* name; uint32_t hash; };
+                struct WeaponEntry { const char* name; const char* model; };
                 struct WeaponCategory { const char* name; std::vector<WeaponEntry> weapons; };
 
+                // Hashes are computed from the model name with the game's own
+                // joaat function, so a typo can never produce a wrong hash.
                 static const std::vector<WeaponCategory> weapon_categories = {
+                    { "Handguns", {
+                        { "Pistol", "WEAPON_PISTOL" },
+                        { "Pistol Mk2", "WEAPON_PISTOL_MK2" },
+                        { "Combat Pistol", "WEAPON_COMBATPISTOL" },
+                        { "AP Pistol", "WEAPON_APPISTOL" },
+                        { "Pistol .50", "WEAPON_PISTOL50" },
+                        { "SNS Pistol", "WEAPON_SNSPISTOL" },
+                        { "SNS Pistol Mk2", "WEAPON_SNSPISTOL_MK2" },
+                        { "Heavy Pistol", "WEAPON_HEAVYPISTOL" },
+                        { "Vintage Pistol", "WEAPON_VINTAGEPISTOL" },
+                        { "Marksman Pistol", "WEAPON_MARKSMANPISTOL" },
+                        { "Revolver", "WEAPON_REVOLVER" },
+                        { "Revolver Mk2", "WEAPON_REVOLVER_MK2" },
+                        { "Double Action", "WEAPON_DOUBLEACTION" },
+                        { "Up-n-Atomizer", "WEAPON_RAYPISTOL" },
+                        { "Ceramic Pistol", "WEAPON_CERAMICPISTOL" },
+                        { "Navy Revolver", "WEAPON_NAVYREVOLVER" },
+                        { "Perico Pistol", "WEAPON_GADGETPISTOL" },
+                        { "Stun Gun", "WEAPON_STUNGUN" },
+                        { "Stun Gun (MP)", "WEAPON_STUNGUN_MP" },
+                        { "Flare Gun", "WEAPON_FLAREGUN" }
+                    }},
+                    { "SMG & MG", {
+                        { "Micro SMG", "WEAPON_MICROSMG" },
+                        { "SMG", "WEAPON_SMG" },
+                        { "SMG Mk2", "WEAPON_SMG_MK2" },
+                        { "Assault SMG", "WEAPON_ASSAULTSMG" },
+                        { "Combat PDW", "WEAPON_COMBATPDW" },
+                        { "Machine Pistol", "WEAPON_MACHINEPISTOL" },
+                        { "Mini SMG", "WEAPON_MINISMG" },
+                        { "MG", "WEAPON_MG" },
+                        { "Combat MG", "WEAPON_COMBATMG" },
+                        { "Combat MG Mk2", "WEAPON_COMBATMG_MK2" },
+                        { "Unholy Hellbringer", "WEAPON_RAYCARBINE" },
+                        { "Tactical SMG", "WEAPON_TECPISTOL" },
+                        { "Gusenberg", "WEAPON_GUSENBERG" }
+                    }},
+                    { "Assault Rifles", {
+                        { "Assault Rifle", "WEAPON_ASSAULTRIFLE" },
+                        { "Assault Rifle Mk2", "WEAPON_ASSAULTRIFLE_MK2" },
+                        { "Carbine Rifle", "WEAPON_CARBINERIFLE" },
+                        { "Carbine Rifle Mk2", "WEAPON_CARBINERIFLE_MK2" },
+                        { "Advanced Rifle", "WEAPON_ADVANCEDRIFLE" },
+                        { "Special Carbine", "WEAPON_SPECIALCARBINE" },
+                        { "Special Carbine Mk2", "WEAPON_SPECIALCARBINE_MK2" },
+                        { "Bullpup Rifle", "WEAPON_BULLPUPRIFLE" },
+                        { "Bullpup Rifle Mk2", "WEAPON_BULLPUPRIFLE_MK2" },
+                        { "Compact Rifle", "WEAPON_COMPACTRIFLE" },
+                        { "Military Rifle", "WEAPON_MILITARYRIFLE" },
+                        { "Heavy Rifle", "WEAPON_HEAVYRIFLE" },
+                        { "Tactical Rifle", "WEAPON_TACTICALRIFLE" }
+                    }},
+                    { "Sniper Rifles", {
+                        { "Sniper Rifle", "WEAPON_SNIPERRIFLE" },
+                        { "Heavy Sniper", "WEAPON_HEAVYSNIPER" },
+                        { "Heavy Sniper Mk2", "WEAPON_HEAVYSNIPER_MK2" },
+                        { "Marksman Rifle", "WEAPON_MARKSMANRIFLE" },
+                        { "Marksman Rifle Mk2", "WEAPON_MARKSMANRIFLE_MK2" },
+                        { "Precision Rifle", "WEAPON_PRECISIONRIFLE" }
+                    }},
+                    { "Shotguns", {
+                        { "Pump Shotgun", "WEAPON_PUMPSHOTGUN" },
+                        { "Pump Shotgun Mk2", "WEAPON_PUMPSHOTGUN_MK2" },
+                        { "Sawed-Off", "WEAPON_SAWNOFFSHOTGUN" },
+                        { "Assault Shotgun", "WEAPON_ASSAULTSHOTGUN" },
+                        { "Bullpup Shotgun", "WEAPON_BULLPUPSHOTGUN" },
+                        { "Musket", "WEAPON_MUSKET" },
+                        { "Heavy Shotgun", "WEAPON_HEAVYSHOTGUN" },
+                        { "Double Barrel", "WEAPON_DBSHOTGUN" },
+                        { "Auto Shotgun", "WEAPON_AUTOSHOTGUN" },
+                        { "Combat Shotgun", "WEAPON_COMBATSHOTGUN" }
+                    }},
+                    { "Heavy", {
+                        { "Grenade Launcher", "WEAPON_GRENADELAUNCHER" },
+                        { "Smoke Launcher", "WEAPON_GRENADELAUNCHER_SMOKE" },
+                        { "RPG", "WEAPON_RPG" },
+                        { "Homing Launcher", "WEAPON_STINGER" },
+                        { "Minigun", "WEAPON_MINIGUN" },
+                        { "Firework Launcher", "WEAPON_FIREWORK" },
+                        { "Railgun", "WEAPON_RAILGUN" },
+                        { "Widowmaker", "WEAPON_RAYMINIGUN" },
+                        { "Compact Launcher", "WEAPON_COMPACTLAUNCHER" },
+                        { "Compact EMP Launcher", "WEAPON_EMP" },
+                        { "Railgun XM3", "WEAPON_RAILGUNXM3" }
+                    }},
+                    { "Throwables", {
+                        { "Grenade", "WEAPON_GRENADE" },
+                        { "BZ Gas", "WEAPON_BZGAS" },
+                        { "Molotov", "WEAPON_MOLOTOV" },
+                        { "Sticky Bomb", "WEAPON_STICKYBOMB" },
+                        { "Proximity Mine", "WEAPON_PROXMINE" },
+                        { "Pipe Bomb", "WEAPON_PIPEBOMB" },
+                        { "Smoke Grenade", "WEAPON_SMOKEGRENADE" },
+                        { "Flare", "WEAPON_FLARE" },
+                        { "Baseball", "WEAPON_BALL" },
+                        { "Snowball", "WEAPON_SNOWBALL" },
+                        { "Hazard Can", "WEAPON_HAZARDCAN" },
+                        { "Petrol Can", "WEAPON_PETROLCAN" },
+                        { "Fertilizer Can", "WEAPON_FERTILIZERCAN" },
+                        { "Acid Package", "WEAPON_ACIDPACKAGE" }
+                    }},
                     { "Melee", {
-                        { "Dagger", 0x92A27487 }, { "Bat", 0x958A4A8F }, { "Bottle", 0xF9E6AA4B },
-                        { "Crowbar", 0x84BD7BFD }, { "Flashlight", 0x8BB05FD7 }, { "Golf Club", 0x440E4788 },
-                        { "Hammer", 0x4E875F73 }, { "Hatchet", 0xF9DCBF2D }, { "Knuckle", 0xD8DF3C3C },
-                        { "Knife", 0x99B507EA }, { "Machete", 0xDD5DF8D9 }, { "Switchblade", 0xDFE37640 },
-                        { "Nightstick", 0x678B81B1 }, { "Wrench", 0x19044EE0 }, { "Battle Axe", 0xCD274149 },
-                        { "Pool Cue", 0x94117305 }, { "Stone Hatchet", 0x3813FC08 }
-                    }},
-                    { "Pistol", {
-                        { "Pistol", 0x1B06D571 }, { "Pistol Mk2", 0xBFE256D4 }, { "Combat Pistol", 0x5EF9FEC4 },
-                        { "AP Pistol", 0x22D8FE39 }, { "Stun Gun", 0x3656C8C1 }, { "Pistol .50", 0x99AEEB3B },
-                        { "SNS Pistol", 0xBFD21232 }, { "SNS Pistol Mk2", 0x88374054 }, { "Heavy Pistol", 0xD205520E },
-                        { "Vintage Pistol", 0x83839C4 }, { "Flare Gun", 0x47757124 }, { "Marksman Pistol", 0xDC4DB296 },
-                        { "Revolver", 0xC1B3C3D1 }, { "Revolver Mk2", 0xCB96392F }, { "Double Action", 0x97EA20B8 },
-                        { "Ceramic Pistol", 0x2B5EF5EC }, { "Navy Revolver", 0x917F6C8C }
-                    }},
-                    { "Shotgun", {
-                        { "Pump Shotgun", 0x1D073A89 }, { "Pump Shotgun Mk2", 0x555AF99A }, { "Sawed-Off", 0x7846A318 },
-                        { "Assault Shotgun", 0xE284C527 }, { "Bullpup Shotgun", 0x9D61E50F }, { "Musket", 0xA89CB99E },
-                        { "Heavy Shotgun", 0x3AABBBAA }, { "Double Barrel", 0xEF951FBB }, { "Auto Shotgun", 0x12E82D3D }
-                    }},
-                    { "Submachine Gun", {
-                        { "Micro SMG", 0x13532244 }, { "SMG", 0x2BE6766B }, { "SMG Mk2", 0x78A97CD0 },
-                        { "Assault SMG", 0xEFE7E2DF }, { "Combat PDW", 0xA3D4D34 }, { "Machine Pistol", 0xDB1AA450 },
-                        { "Mini SMG", 0xBD248B55 }
-                    }},
-                    { "Machine Gun", {
-                        { "MG", 0x9D07F764 }, { "Combat MG", 0x7FD62962 }, { "Combat MG Mk2", 0xDBBD7280 },
-                        { "Gusenberg", 0x61012683 }
-                    }},
-                    { "Rifle", {
-                        { "Assault Rifle", 0xBFEFFF6D }, { "Assault Rifle Mk2", 0x394F415C }, { "Carbine Rifle", 0x83BF0278 },
-                        { "Carbine Rifle Mk2", 0xFAD1F1C9 }, { "Advanced Rifle", 0xAF113F99 }, { "Special Carbine", 0xC0A3098D },
-                        { "Special Carbine Mk2", 0x969C3D67 }, { "Bullpup Rifle", 0x7F229F94 }, { "Bullpup Rifle Mk2", 0x84D6FAFD },
-                        { "Compact Rifle", 0x624FE830 }
-                    }},
-                    { "Sniper", {
-                        { "Sniper Rifle", 0x5FC3C11 }, { "Heavy Sniper", 0xC472FE2 }, { "Heavy Sniper Mk2", 0xA914799 },
-                        { "Marksman Rifle", 0xC734385A }, { "Marksman Rifle Mk2", 0x6A6C02E0 }
-                    }},
-                    { "Explosive", {
-                        { "RPG", 0xB1CA77B1 }, { "Grenade Launcher", 0xA284510B }, { "Smoke Launcher", 0x4DD2DC56 },
-                        { "Minigun", 0x42BF8A85 }, { "Firework", 0x7F7497E5 }, { "Railgun", 0x6D544C99 },
-                        { "Homing Launcher", 0x63AB0442 }, { "Compact Launcher", 0x781FE4A }, { "Ray Minigun", 0xB62D1F67 },
-                        { "Grenade", 0x93E220BD }, { "BZ Gas", 0xA0973D5E }, { "Smoke Grenade", 0xFDBC8A50 },
-                        { "Flare", 0x497FACC3 }, { "Molotov", 0x24B17070 }, { "Sticky Bomb", 0x2C3731D9 },
-                        { "Proximity Mine", 0xAB564B93 }, { "Pipe Bomb", 0xBA45E8B8 }
+                        { "Knife", "WEAPON_KNIFE" },
+                        { "Knuckle Dusters", "WEAPON_KNUCKLE" },
+                        { "Nightstick", "WEAPON_NIGHTSTICK" },
+                        { "Hammer", "WEAPON_HAMMER" },
+                        { "Baseball Bat", "WEAPON_BAT" },
+                        { "Golf Club", "WEAPON_GOLFCLUB" },
+                        { "Crowbar", "WEAPON_CROWBAR" },
+                        { "Bottle", "WEAPON_BOTTLE" },
+                        { "Dagger", "WEAPON_DAGGER" },
+                        { "Machete", "WEAPON_MACHETE" },
+                        { "Flashlight", "WEAPON_FLASHLIGHT" },
+                        { "Switchblade", "WEAPON_SWITCHBLADE" },
+                        { "Pool Cue", "WEAPON_POOLCUE" },
+                        { "Wrench", "WEAPON_WRENCH" },
+                        { "Battle Axe", "WEAPON_BATTLEAXE" },
+                        { "Stone Hatchet", "WEAPON_STONE_HATCHET" },
+                        { "Candy Cane", "WEAPON_CANDY_CANE" }
                     }}
                 };
 
@@ -7309,7 +7417,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     TextDisabled("No local player.");
                 }
                 else {
-                    const uint32_t weapon_hash = selected_weapons[spawn_weapon].hash;
+                    const uint32_t weapon_hash = Core::Features::Chaos::Joaat(selected_weapons[spawn_weapon].model);
 
                     const float spawn_gap = 6.f ds;
                     const float spawn_button_width = (GetContentRegionAvail().x - spawn_gap) * 0.5f;
