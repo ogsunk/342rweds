@@ -721,7 +721,6 @@ void Core::Features::cEsp::DrawRadar()
 	const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
 	const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 2.0f);
 	const float crop_half = range / zoom;
-	const float scale = (std::min(width, height) * 0.5f) / crop_half;
 	const float transparency = std::clamp(cfg->RadarTransparency, 0.0f, 1.0f);
 
 	auto* local = Core::SDK::Pointers::pLocalPlayer;
