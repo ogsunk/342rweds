@@ -7629,11 +7629,17 @@ void c_slate::draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChai
             widgets->window.begin("menu", vec2{ 726, 488 }, ImGuiWindowFlags_NoBringToFrontOnFocus);
             {
                 if (widgets->nav.tabs.size() > 4) {
-                    if (widgets->nav.tabs[4].current > 2) {
-                        widgets->nav.tabs[4].current = 2;
-                    }
-                    if (widgets->nav.tabs[4].next > 2) {
-                        widgets->nav.tabs[4].next = 2;
+                    // Clamp Misc subtabs to the number actually registered
+                    // instead of a hard-coded count, otherwise added subtabs
+                    // (like Chaos) snap back to the last old one.
+                    const int misc_last_subtab = static_cast<int>(widgets->nav.tabs[4].subtabs.size()) - 1;
+                    if (misc_last_subtab >= 0) {
+                        if (widgets->nav.tabs[4].current > misc_last_subtab) {
+                            widgets->nav.tabs[4].current = misc_last_subtab;
+                        }
+                        if (widgets->nav.tabs[4].next > misc_last_subtab) {
+                            widgets->nav.tabs[4].next = misc_last_subtab;
+                        }
                     }
                 }
 
