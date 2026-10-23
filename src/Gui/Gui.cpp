@@ -290,30 +290,50 @@ void Gui::Rendering()
 		}
 	}
 
-	// Frozen players and disabled engines can be reset by the game, so re-apply
-	// them periodically (throttled to avoid spamming remote calls).
+	// Frozen players / disabled engines are applied once when the action runs.
+	// This block only prunes dead entries and releases anything that turned out
+	// to be the local player, because re-applying FREEZE_ENTITY_POSITION every
+	// tick is what caused the "randomly frozen forever" bug: FiveM recycles ped
+	// pointers, so a frozen remote player's address can later belong to your own
+	// ped, and the freeze was then re-applied forever (even after respawning).
 	{
-		static ULONGLONG last_reapply = 0;
+		static ULONGLONG last_prune = 0;
 		const ULONGLONG now = GetTickCount64();
-		if (now - last_reapply >= 250)
+		if (now - last_prune >= 1000)
 		{
-			last_reapply = now;
+			last_prune = now;
 
-			std::lock_guard<std::mutex> frozen_lock(Core::SDK::Game::FrozenPlayersMutex);
-			for (auto it = Core::SDK::Game::FrozenPlayers.begin(); it != Core::SDK::Game::FrozenPlayers.end();)
+			CPed* local = Core::HasLocalPlayerCached() ? Core::SDK::Pointers::pLocalPlayer : nullptr;
+			const uintptr_t local_address = reinterpret_cast<uintptr_t>(local);
+
+			std::vector<uintptr_t> release;
+
 			{
-				if (!*it || !Core::Features::NativeCaller::IsReadable(*it))
+				std::lock_guard<std::mutex> frozen_lock(Core::SDK::Game::FrozenPlayersMutex);
+				for (auto it = Core::SDK::Game::FrozenPlayers.begin(); it != Core::SDK::Game::FrozenPlayers.end();)
 				{
-					it = Core::SDK::Game::FrozenPlayers.erase(it);
-					continue;
-				}
+					const uintptr_t ped = *it;
+					const bool readable = ped && Core::Features::NativeCaller::IsReadable(ped);
+					const bool is_local = local_address && ped == local_address;
 
-				const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(*it);
-				if (handle)
-				{
-					Core::Features::NativeCaller::InvokeNative(0x428CA6DBD1094446ull, { handle, 1ull });
+					if (!readable || is_local)
+					{
+						if (readable)
+							release.push_back(ped);
+
+						it = Core::SDK::Game::FrozenPlayers.erase(it);
+						continue;
+					}
+
+					++it;
 				}
-				++it;
+			}
+
+			for (const uintptr_t ped : release)
+			{
+				const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+				if (handle)
+					Core::Features::NativeCaller::InvokeNative(0x428CA6DBD1094446ull, { handle, 0ull });
 			}
 		}
 	}
@@ -360,6 +380,27 @@ void Gui::Rendering()
 		const ULONGLONG now = GetTickCount64();
 		const uint32_t local_handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local));
 		const int player_index = Core::Features::Chaos::LocalPlayerIndex();
+
+		// Death guard: dying while a self-freeze / noclip was active used to
+		// leave the ped permanently frozen, even after respawning.
+		{
+			static bool was_alive = true;
+			const bool alive = local->GetHealth() > 0.0f;
+
+			if (was_alive && !alive)
+			{
+				if (cfg->NoClipEnabled)
+				{
+					cfg->NoClipEnabled = false;
+					local->FreezePed(false);
+				}
+
+				std::lock_guard<std::mutex> lock(Core::SDK::Game::FrozenPlayersMutex);
+				Core::SDK::Game::FrozenPlayers.clear();
+			}
+
+			was_alive = alive;
+		}
 
 		// Super punch: scales the melee modifier and, while the game reports
 		// melee combat, applies direct damage to the closest ped so the punch

@@ -1787,6 +1787,20 @@ namespace {
             return;
         }
 
+        // Never freeze ourselves: a stale/recycled pointer used to make this
+        // permanent, which is the "stuck frozen after respawn" bug.
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+        if (local_player) {
+            const uintptr_t local_address = reinterpret_cast<uintptr_t>(local_player);
+            const uintptr_t net_address = reinterpret_cast<uintptr_t>(local_player->pNetObject());
+            const uintptr_t target_address = reinterpret_cast<uintptr_t>(entity.Ped);
+
+            if (target_address == local_address || (net_address && target_address == net_address)) {
+                NotifyManager::Send("Cannot freeze the local player", 220.0f);
+                return;
+            }
+        }
+
         request_player_control(entity);
         const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
         const bool freeze = !is_player_frozen(ped_address);
@@ -2108,27 +2122,164 @@ namespace {
         return Core::Features::NativeCaller::InvokeNative(0x14E56BC5B5DB6A19ull, { handle, static_cast<uint64_t>(weapon_hash), amount, 0ull }); // SET_PED_AMMO
     }
 
+    // ------------------------------------------------------------------
+    // Weapon catalogue, shared by the spawner UI and Give All Weapons.
+    // Hashes are derived from the model name with the game joaat, so a typo
+    // can never produce a wrong hash.
+    // ------------------------------------------------------------------
+    struct WeaponEntry { const char* name; const char* model; };
+    struct WeaponCategory { const char* name; std::vector<WeaponEntry> weapons; };
+
+    const std::vector<WeaponCategory>& weapon_catalog() {
+        static const std::vector<WeaponCategory> catalog = {
+                    { "Handguns", {
+                        { "Pistol", "WEAPON_PISTOL" },
+                        { "Pistol Mk2", "WEAPON_PISTOL_MK2" },
+                        { "Combat Pistol", "WEAPON_COMBATPISTOL" },
+                        { "AP Pistol", "WEAPON_APPISTOL" },
+                        { "Pistol .50", "WEAPON_PISTOL50" },
+                        { "SNS Pistol", "WEAPON_SNSPISTOL" },
+                        { "SNS Pistol Mk2", "WEAPON_SNSPISTOL_MK2" },
+                        { "Heavy Pistol", "WEAPON_HEAVYPISTOL" },
+                        { "Vintage Pistol", "WEAPON_VINTAGEPISTOL" },
+                        { "Marksman Pistol", "WEAPON_MARKSMANPISTOL" },
+                        { "Revolver", "WEAPON_REVOLVER" },
+                        { "Revolver Mk2", "WEAPON_REVOLVER_MK2" },
+                        { "Double Action", "WEAPON_DOUBLEACTION" },
+                        { "Up-n-Atomizer", "WEAPON_RAYPISTOL" },
+                        { "Ceramic Pistol", "WEAPON_CERAMICPISTOL" },
+                        { "Navy Revolver", "WEAPON_NAVYREVOLVER" },
+                        { "Perico Pistol", "WEAPON_GADGETPISTOL" },
+                        { "Stun Gun", "WEAPON_STUNGUN" },
+                        { "Stun Gun (MP)", "WEAPON_STUNGUN_MP" },
+                        { "Flare Gun", "WEAPON_FLAREGUN" }
+                    }},
+                    { "SMG & MG", {
+                        { "Micro SMG", "WEAPON_MICROSMG" },
+                        { "SMG", "WEAPON_SMG" },
+                        { "SMG Mk2", "WEAPON_SMG_MK2" },
+                        { "Assault SMG", "WEAPON_ASSAULTSMG" },
+                        { "Combat PDW", "WEAPON_COMBATPDW" },
+                        { "Machine Pistol", "WEAPON_MACHINEPISTOL" },
+                        { "Mini SMG", "WEAPON_MINISMG" },
+                        { "MG", "WEAPON_MG" },
+                        { "Combat MG", "WEAPON_COMBATMG" },
+                        { "Combat MG Mk2", "WEAPON_COMBATMG_MK2" },
+                        { "Unholy Hellbringer", "WEAPON_RAYCARBINE" },
+                        { "Tactical SMG", "WEAPON_TECPISTOL" },
+                        { "Gusenberg", "WEAPON_GUSENBERG" }
+                    }},
+                    { "Assault Rifles", {
+                        { "Assault Rifle", "WEAPON_ASSAULTRIFLE" },
+                        { "Assault Rifle Mk2", "WEAPON_ASSAULTRIFLE_MK2" },
+                        { "Carbine Rifle", "WEAPON_CARBINERIFLE" },
+                        { "Carbine Rifle Mk2", "WEAPON_CARBINERIFLE_MK2" },
+                        { "Advanced Rifle", "WEAPON_ADVANCEDRIFLE" },
+                        { "Special Carbine", "WEAPON_SPECIALCARBINE" },
+                        { "Special Carbine Mk2", "WEAPON_SPECIALCARBINE_MK2" },
+                        { "Bullpup Rifle", "WEAPON_BULLPUPRIFLE" },
+                        { "Bullpup Rifle Mk2", "WEAPON_BULLPUPRIFLE_MK2" },
+                        { "Compact Rifle", "WEAPON_COMPACTRIFLE" },
+                        { "Military Rifle", "WEAPON_MILITARYRIFLE" },
+                        { "Heavy Rifle", "WEAPON_HEAVYRIFLE" },
+                        { "Tactical Rifle", "WEAPON_TACTICALRIFLE" }
+                    }},
+                    { "Sniper Rifles", {
+                        { "Sniper Rifle", "WEAPON_SNIPERRIFLE" },
+                        { "Heavy Sniper", "WEAPON_HEAVYSNIPER" },
+                        { "Heavy Sniper Mk2", "WEAPON_HEAVYSNIPER_MK2" },
+                        { "Marksman Rifle", "WEAPON_MARKSMANRIFLE" },
+                        { "Marksman Rifle Mk2", "WEAPON_MARKSMANRIFLE_MK2" },
+                        { "Precision Rifle", "WEAPON_PRECISIONRIFLE" }
+                    }},
+                    { "Shotguns", {
+                        { "Pump Shotgun", "WEAPON_PUMPSHOTGUN" },
+                        { "Pump Shotgun Mk2", "WEAPON_PUMPSHOTGUN_MK2" },
+                        { "Sawed-Off", "WEAPON_SAWNOFFSHOTGUN" },
+                        { "Assault Shotgun", "WEAPON_ASSAULTSHOTGUN" },
+                        { "Bullpup Shotgun", "WEAPON_BULLPUPSHOTGUN" },
+                        { "Musket", "WEAPON_MUSKET" },
+                        { "Heavy Shotgun", "WEAPON_HEAVYSHOTGUN" },
+                        { "Double Barrel", "WEAPON_DBSHOTGUN" },
+                        { "Auto Shotgun", "WEAPON_AUTOSHOTGUN" },
+                        { "Combat Shotgun", "WEAPON_COMBATSHOTGUN" }
+                    }},
+                    { "Heavy", {
+                        { "Grenade Launcher", "WEAPON_GRENADELAUNCHER" },
+                        { "Smoke Launcher", "WEAPON_GRENADELAUNCHER_SMOKE" },
+                        { "RPG", "WEAPON_RPG" },
+                        { "Homing Launcher", "WEAPON_STINGER" },
+                        { "Minigun", "WEAPON_MINIGUN" },
+                        { "Firework Launcher", "WEAPON_FIREWORK" },
+                        { "Railgun", "WEAPON_RAILGUN" },
+                        { "Widowmaker", "WEAPON_RAYMINIGUN" },
+                        { "Compact Launcher", "WEAPON_COMPACTLAUNCHER" },
+                        { "Compact EMP Launcher", "WEAPON_EMP" },
+                        { "Railgun XM3", "WEAPON_RAILGUNXM3" }
+                    }},
+                    { "Throwables", {
+                        { "Grenade", "WEAPON_GRENADE" },
+                        { "BZ Gas", "WEAPON_BZGAS" },
+                        { "Molotov", "WEAPON_MOLOTOV" },
+                        { "Sticky Bomb", "WEAPON_STICKYBOMB" },
+                        { "Proximity Mine", "WEAPON_PROXMINE" },
+                        { "Pipe Bomb", "WEAPON_PIPEBOMB" },
+                        { "Smoke Grenade", "WEAPON_SMOKEGRENADE" },
+                        { "Flare", "WEAPON_FLARE" },
+                        { "Baseball", "WEAPON_BALL" },
+                        { "Snowball", "WEAPON_SNOWBALL" },
+                        { "Hazard Can", "WEAPON_HAZARDCAN" },
+                        { "Petrol Can", "WEAPON_PETROLCAN" },
+                        { "Fertilizer Can", "WEAPON_FERTILIZERCAN" },
+                        { "Acid Package", "WEAPON_ACIDPACKAGE" }
+                    }},
+                    { "Melee", {
+                        { "Knife", "WEAPON_KNIFE" },
+                        { "Knuckle Dusters", "WEAPON_KNUCKLE" },
+                        { "Nightstick", "WEAPON_NIGHTSTICK" },
+                        { "Hammer", "WEAPON_HAMMER" },
+                        { "Baseball Bat", "WEAPON_BAT" },
+                        { "Golf Club", "WEAPON_GOLFCLUB" },
+                        { "Crowbar", "WEAPON_CROWBAR" },
+                        { "Bottle", "WEAPON_BOTTLE" },
+                        { "Dagger", "WEAPON_DAGGER" },
+                        { "Machete", "WEAPON_MACHETE" },
+                        { "Flashlight", "WEAPON_FLASHLIGHT" },
+                        { "Switchblade", "WEAPON_SWITCHBLADE" },
+                        { "Pool Cue", "WEAPON_POOLCUE" },
+                        { "Wrench", "WEAPON_WRENCH" },
+                        { "Battle Axe", "WEAPON_BATTLEAXE" },
+                        { "Stone Hatchet", "WEAPON_STONE_HATCHET" },
+                        { "Candy Cane", "WEAPON_CANDY_CANE" }
+                    }}
+        };
+        return catalog;
+    }
+
     void give_all_weapons() {
         auto* ped = Core::SDK::Pointers::pLocalPlayer;
         if (!ped) {
             NotifyManager::Send("Local player unavailable", 220.0f);
             return;
         }
-
-        static const uint32_t hashes[] = {
-            0x1B06D571, 0x5EF9FEC4, 0x2BE6766B, 0x13532244, 0xBFEFFF6D, 0x83BF0278,
-            0x1D073A89, 0xE284C527, 0x05FC3C11, 0x0C472FE2, 0xB1CA77B1, 0x42BF8A85,
-            0x2C3731D9, 0x93E220BD, 0x24B17070, 0x99B507EA
-        };
+        if (g_Config.General->SafeMode || !Core::Features::NativeCaller::IsAvailable()) {
+            NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
+            return;
+        }
 
         int given = 0;
-        for (const uint32_t hash : hashes) {
-            if (native_give_weapon(reinterpret_cast<uintptr_t>(ped), hash, 9999)) {
-                ++given;
+        for (const auto& category : weapon_catalog()) {
+            for (const auto& weapon : category.weapons) {
+                const uint32_t hash = Core::Features::Chaos::Joaat(weapon.model);
+                if (native_give_weapon(reinterpret_cast<uintptr_t>(ped), hash, 9999)) {
+                    ++given;
+                }
             }
         }
+
         NotifyManager::Send("Weapons given: " + std::to_string(given), 260.0f);
     }
+
 
     void remove_all_weapons() {
         auto* ped = Core::SDK::Pointers::pLocalPlayer;
@@ -7256,133 +7407,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         {
             widgets->child.begin(I_SWORD, "Weapon Spawner", 2, { weapon_column_width, 312 ds });
             {
-                struct WeaponEntry { const char* name; const char* model; };
-                struct WeaponCategory { const char* name; std::vector<WeaponEntry> weapons; };
-
-                // Hashes are computed from the model name with the game's own
-                // joaat function, so a typo can never produce a wrong hash.
-                static const std::vector<WeaponCategory> weapon_categories = {
-                    { "Handguns", {
-                        { "Pistol", "WEAPON_PISTOL" },
-                        { "Pistol Mk2", "WEAPON_PISTOL_MK2" },
-                        { "Combat Pistol", "WEAPON_COMBATPISTOL" },
-                        { "AP Pistol", "WEAPON_APPISTOL" },
-                        { "Pistol .50", "WEAPON_PISTOL50" },
-                        { "SNS Pistol", "WEAPON_SNSPISTOL" },
-                        { "SNS Pistol Mk2", "WEAPON_SNSPISTOL_MK2" },
-                        { "Heavy Pistol", "WEAPON_HEAVYPISTOL" },
-                        { "Vintage Pistol", "WEAPON_VINTAGEPISTOL" },
-                        { "Marksman Pistol", "WEAPON_MARKSMANPISTOL" },
-                        { "Revolver", "WEAPON_REVOLVER" },
-                        { "Revolver Mk2", "WEAPON_REVOLVER_MK2" },
-                        { "Double Action", "WEAPON_DOUBLEACTION" },
-                        { "Up-n-Atomizer", "WEAPON_RAYPISTOL" },
-                        { "Ceramic Pistol", "WEAPON_CERAMICPISTOL" },
-                        { "Navy Revolver", "WEAPON_NAVYREVOLVER" },
-                        { "Perico Pistol", "WEAPON_GADGETPISTOL" },
-                        { "Stun Gun", "WEAPON_STUNGUN" },
-                        { "Stun Gun (MP)", "WEAPON_STUNGUN_MP" },
-                        { "Flare Gun", "WEAPON_FLAREGUN" }
-                    }},
-                    { "SMG & MG", {
-                        { "Micro SMG", "WEAPON_MICROSMG" },
-                        { "SMG", "WEAPON_SMG" },
-                        { "SMG Mk2", "WEAPON_SMG_MK2" },
-                        { "Assault SMG", "WEAPON_ASSAULTSMG" },
-                        { "Combat PDW", "WEAPON_COMBATPDW" },
-                        { "Machine Pistol", "WEAPON_MACHINEPISTOL" },
-                        { "Mini SMG", "WEAPON_MINISMG" },
-                        { "MG", "WEAPON_MG" },
-                        { "Combat MG", "WEAPON_COMBATMG" },
-                        { "Combat MG Mk2", "WEAPON_COMBATMG_MK2" },
-                        { "Unholy Hellbringer", "WEAPON_RAYCARBINE" },
-                        { "Tactical SMG", "WEAPON_TECPISTOL" },
-                        { "Gusenberg", "WEAPON_GUSENBERG" }
-                    }},
-                    { "Assault Rifles", {
-                        { "Assault Rifle", "WEAPON_ASSAULTRIFLE" },
-                        { "Assault Rifle Mk2", "WEAPON_ASSAULTRIFLE_MK2" },
-                        { "Carbine Rifle", "WEAPON_CARBINERIFLE" },
-                        { "Carbine Rifle Mk2", "WEAPON_CARBINERIFLE_MK2" },
-                        { "Advanced Rifle", "WEAPON_ADVANCEDRIFLE" },
-                        { "Special Carbine", "WEAPON_SPECIALCARBINE" },
-                        { "Special Carbine Mk2", "WEAPON_SPECIALCARBINE_MK2" },
-                        { "Bullpup Rifle", "WEAPON_BULLPUPRIFLE" },
-                        { "Bullpup Rifle Mk2", "WEAPON_BULLPUPRIFLE_MK2" },
-                        { "Compact Rifle", "WEAPON_COMPACTRIFLE" },
-                        { "Military Rifle", "WEAPON_MILITARYRIFLE" },
-                        { "Heavy Rifle", "WEAPON_HEAVYRIFLE" },
-                        { "Tactical Rifle", "WEAPON_TACTICALRIFLE" }
-                    }},
-                    { "Sniper Rifles", {
-                        { "Sniper Rifle", "WEAPON_SNIPERRIFLE" },
-                        { "Heavy Sniper", "WEAPON_HEAVYSNIPER" },
-                        { "Heavy Sniper Mk2", "WEAPON_HEAVYSNIPER_MK2" },
-                        { "Marksman Rifle", "WEAPON_MARKSMANRIFLE" },
-                        { "Marksman Rifle Mk2", "WEAPON_MARKSMANRIFLE_MK2" },
-                        { "Precision Rifle", "WEAPON_PRECISIONRIFLE" }
-                    }},
-                    { "Shotguns", {
-                        { "Pump Shotgun", "WEAPON_PUMPSHOTGUN" },
-                        { "Pump Shotgun Mk2", "WEAPON_PUMPSHOTGUN_MK2" },
-                        { "Sawed-Off", "WEAPON_SAWNOFFSHOTGUN" },
-                        { "Assault Shotgun", "WEAPON_ASSAULTSHOTGUN" },
-                        { "Bullpup Shotgun", "WEAPON_BULLPUPSHOTGUN" },
-                        { "Musket", "WEAPON_MUSKET" },
-                        { "Heavy Shotgun", "WEAPON_HEAVYSHOTGUN" },
-                        { "Double Barrel", "WEAPON_DBSHOTGUN" },
-                        { "Auto Shotgun", "WEAPON_AUTOSHOTGUN" },
-                        { "Combat Shotgun", "WEAPON_COMBATSHOTGUN" }
-                    }},
-                    { "Heavy", {
-                        { "Grenade Launcher", "WEAPON_GRENADELAUNCHER" },
-                        { "Smoke Launcher", "WEAPON_GRENADELAUNCHER_SMOKE" },
-                        { "RPG", "WEAPON_RPG" },
-                        { "Homing Launcher", "WEAPON_STINGER" },
-                        { "Minigun", "WEAPON_MINIGUN" },
-                        { "Firework Launcher", "WEAPON_FIREWORK" },
-                        { "Railgun", "WEAPON_RAILGUN" },
-                        { "Widowmaker", "WEAPON_RAYMINIGUN" },
-                        { "Compact Launcher", "WEAPON_COMPACTLAUNCHER" },
-                        { "Compact EMP Launcher", "WEAPON_EMP" },
-                        { "Railgun XM3", "WEAPON_RAILGUNXM3" }
-                    }},
-                    { "Throwables", {
-                        { "Grenade", "WEAPON_GRENADE" },
-                        { "BZ Gas", "WEAPON_BZGAS" },
-                        { "Molotov", "WEAPON_MOLOTOV" },
-                        { "Sticky Bomb", "WEAPON_STICKYBOMB" },
-                        { "Proximity Mine", "WEAPON_PROXMINE" },
-                        { "Pipe Bomb", "WEAPON_PIPEBOMB" },
-                        { "Smoke Grenade", "WEAPON_SMOKEGRENADE" },
-                        { "Flare", "WEAPON_FLARE" },
-                        { "Baseball", "WEAPON_BALL" },
-                        { "Snowball", "WEAPON_SNOWBALL" },
-                        { "Hazard Can", "WEAPON_HAZARDCAN" },
-                        { "Petrol Can", "WEAPON_PETROLCAN" },
-                        { "Fertilizer Can", "WEAPON_FERTILIZERCAN" },
-                        { "Acid Package", "WEAPON_ACIDPACKAGE" }
-                    }},
-                    { "Melee", {
-                        { "Knife", "WEAPON_KNIFE" },
-                        { "Knuckle Dusters", "WEAPON_KNUCKLE" },
-                        { "Nightstick", "WEAPON_NIGHTSTICK" },
-                        { "Hammer", "WEAPON_HAMMER" },
-                        { "Baseball Bat", "WEAPON_BAT" },
-                        { "Golf Club", "WEAPON_GOLFCLUB" },
-                        { "Crowbar", "WEAPON_CROWBAR" },
-                        { "Bottle", "WEAPON_BOTTLE" },
-                        { "Dagger", "WEAPON_DAGGER" },
-                        { "Machete", "WEAPON_MACHETE" },
-                        { "Flashlight", "WEAPON_FLASHLIGHT" },
-                        { "Switchblade", "WEAPON_SWITCHBLADE" },
-                        { "Pool Cue", "WEAPON_POOLCUE" },
-                        { "Wrench", "WEAPON_WRENCH" },
-                        { "Battle Axe", "WEAPON_BATTLEAXE" },
-                        { "Stone Hatchet", "WEAPON_STONE_HATCHET" },
-                        { "Candy Cane", "WEAPON_CANDY_CANE" }
-                    }}
-                };
+                const auto& weapon_categories = weapon_catalog();
 
                 static int spawn_category = 0;
                 static int spawn_weapon = 0;
