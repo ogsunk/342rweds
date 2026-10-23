@@ -711,34 +711,43 @@ void Core::Features::cEsp::DrawRadar()
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
-	draw->AddRectFilled(min, max, IM_COL32(12, 12, 15, 235), 8.0f);
+	draw->PushClipRect(min, max, true);
+	draw->AddRectFilled(min, max, IM_COL32(10, 12, 16, 240), 8.0f);
 
-	// Map background, cropped north-up around the local player.
-	if (g_Variables.MapTexture != nullptr)
+	// Accurate world-space grid (100 m cells, anchored to the world origin).
 	{
-		const float u = (origin.x - MAP_MIN_X) / MAP_W;
-		const float v = (MAP_MAX_Y - origin.y) / MAP_H;
-		const float du = crop_half / MAP_W;
-		const float dv = crop_half / MAP_H;
-
-		draw->PushClipRect(min, max, true);
-		draw->AddImage(
-			reinterpret_cast<ImTextureID>(g_Variables.MapTexture),
-			min, max,
-			ImVec2(u - du, v - dv), ImVec2(u + du, v + dv),
-			IM_COL32(255, 255, 255, static_cast<int>(transparency * 255.0f)));
-		draw->PopClipRect();
+		const float cell = 100.0f * scale;
+		if (cell > 4.0f)
+		{
+			const float start_x = center.x - std::fmod(origin.x, 100.0f) * scale;
+			for (float gx = start_x; gx < max.x; gx += cell)
+			{
+				if (gx >= min.x)
+					draw->AddLine(ImVec2(gx, min.y), ImVec2(gx, max.y), IM_COL32(255, 255, 255, 16), 1.0f);
+			}
+			const float start_y = center.y + std::fmod(origin.y, 100.0f) * scale;
+			for (float gy = start_y; gy < max.y; gy += cell)
+			{
+				if (gy >= min.y)
+					draw->AddLine(ImVec2(min.x, gy), ImVec2(max.x, gy), IM_COL32(255, 255, 255, 16), 1.0f);
+			}
+		}
 	}
 
-	// Range rings + border.
-	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 28), 48, 1.0f);
-	draw->AddCircle(center, std::min(width, height) * 0.45f, IM_COL32(255, 255, 255, 22), 64, 1.0f);
+	// Range rings.
+	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 34), 64, 1.0f);
+	draw->AddCircle(center, std::min(width, height) * 0.45f, IM_COL32(255, 255, 255, 26), 64, 1.0f);
+	draw->PopClipRect();
+
 	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
 
-	// Header + North indicator.
-	draw->AddRectFilled(min, ImVec2(max.x, min.y + 20.0f), IM_COL32(8, 8, 10, 230), 8.0f, ImDrawFlags_RoundCornersTop);
+	// Header + cardinal markers.
+	draw->AddRectFilled(min, ImVec2(max.x, min.y + 20.0f), IM_COL32(8, 8, 10, 235), 8.0f, ImDrawFlags_RoundCornersTop);
 	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 4.0f), IM_COL32(205, 50, 65, 255), "RADAR");
 	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, min.y + 24.0f), IM_COL32(255, 255, 255, 220), "N");
+	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, max.y - 30.0f), IM_COL32(255, 255, 255, 140), "S");
+	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 6.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "W");
+	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(max.x - 14.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "E");
 
 	// Player marker (arrow) at the centre.
 	{
