@@ -1,0 +1,2 @@
+map.png : 21811766 bytes
+  hr=0 tex=1

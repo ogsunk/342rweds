@@ -6014,6 +6014,10 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->sliderfloat(I_GRADIENTER, "Height", &g_Config.ESP->RadarHeight, 100.0f, 600.0f, "%.0fpx");
                 widgets->sliderfloat(I_GRADIENTER, "Zoom", &g_Config.ESP->RadarZoom, 0.2f, 5.0f, "%.2fx");
                 widgets->sliderfloat(I_GRADIENTER, "Transparency", &g_Config.ESP->RadarTransparency, 0.0f, 1.0f, "%.2f");
+                widgets->checkbox(I_CURRENT__LOCATION, "Rotate with Player", &g_Config.ESP->RadarRotate);
+                widgets->sliderfloat(I_GRADIENTER, "Map Offset X", &g_Config.ESP->RadarOffsetX, -1000.0f, 1000.0f, "%.0f");
+                widgets->sliderfloat(I_GRADIENTER, "Map Offset Y", &g_Config.ESP->RadarOffsetY, -1000.0f, 1000.0f, "%.0f");
+                widgets->sliderfloat(I_GRADIENTER, "Map Scale", &g_Config.ESP->RadarMapScale, 0.5f, 1.5f, "%.3f");
             }
             widgets->child.end();
         }

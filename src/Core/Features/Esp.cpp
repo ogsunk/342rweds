@@ -663,6 +663,39 @@ namespace
 	}
 }
 
+namespace
+{
+	// Cached GET_ENTITY_HEADING (degrees, 0 = north). Throttled to avoid
+	// creating a remote thread every frame.
+	float get_entity_heading(uintptr_t ped)
+	{
+		static uintptr_t cached_ped = 0;
+		static float cached_heading = 0.0f;
+		static ULONGLONG cached_time = 0;
+
+		if (!ped || !Core::Features::NativeCaller::IsAvailable())
+			return cached_heading;
+
+		const ULONGLONG now = GetTickCount64();
+		if (ped == cached_ped && now - cached_time < 120)
+			return cached_heading;
+
+		const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
+		if (!handle)
+			return cached_heading;
+
+		uint64_t result = 0;
+		if (Core::Features::NativeCaller::InvokeNative(0xE83D4F9BA2A38914ull, { handle }, &result))
+		{
+			const uint32_t bits = static_cast<uint32_t>(result);
+			std::memcpy(&cached_heading, &bits, sizeof(float));
+			cached_ped = ped;
+			cached_time = now;
+		}
+		return cached_heading;
+	}
+}
+
 void Core::Features::cEsp::DrawRadar()
 {
 	auto* cfg = g_Config.ESP;
@@ -704,7 +737,6 @@ void Core::Features::cEsp::DrawRadar()
 	const D3DXVECTOR3 origin = local->GetPos();
 
 	// Calibrated world bounds for map.png (square map covering the GTA V world).
-	// Y uses the minimap.ymt extents; X is the same square span centred on the map.
 	constexpr float MAP_MIN_X = -6390.0f;
 	constexpr float MAP_MAX_X = 7110.0f;
 	constexpr float MAP_MIN_Y = -5100.0f;
@@ -712,22 +744,50 @@ void Core::Features::cEsp::DrawRadar()
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
+	const float map_scale = std::clamp(cfg->RadarMapScale, 0.5f, 1.5f);
+	const float effective_crop = crop_half / map_scale;
+	const float scale = (std::min(width, height) * 0.5f) / effective_crop;
+
+	const float heading_deg = get_entity_heading(reinterpret_cast<uintptr_t>(local));
+	const float ang = cfg->RadarRotate ? (-heading_deg * 3.14159265358979f / 180.0f) : 0.0f;
+	const float ca = std::cos(ang);
+	const float sa = std::sin(ang);
+	auto rp = [&](float x, float y) {
+		return ImVec2(center.x + x * ca - y * sa, center.y + x * sa + y * ca);
+	};
+
 	draw->PushClipRect(min, max, true);
 	draw->AddRectFilled(min, max, IM_COL32(10, 12, 16, 240), 8.0f);
 
-	// Calibrated GTA V map, cropped around the local player (north-up).
 	if (g_Variables.MapTexture != nullptr)
 	{
-		const float u = (origin.x - MAP_MIN_X) / MAP_W;
-		const float v = (MAP_MAX_Y - origin.y) / MAP_H;
-		const float du = crop_half / MAP_W;
-		const float dv = crop_half / MAP_H;
+		const float cx = origin.x + cfg->RadarOffsetX;
+		const float cy = origin.y + cfg->RadarOffsetY;
+		const float u = (cx - MAP_MIN_X) / MAP_W;
+		const float v = (MAP_MAX_Y - cy) / MAP_H;
+		const float du = effective_crop / MAP_W;
+		const float dv = effective_crop / MAP_H;
 
-		draw->AddImage(
-			reinterpret_cast<ImTextureID>(g_Variables.MapTexture),
-			min, max,
-			ImVec2(u - du, v - dv), ImVec2(u + du, v + dv),
-			IM_COL32(255, 255, 255, static_cast<int>(std::clamp(transparency + 0.25f, 0.0f, 1.0f) * 255.0f)));
+		const ImVec2 uv1(u - du, v - dv);
+		const ImVec2 uv2(u + du, v - dv);
+		const ImVec2 uv3(u + du, v + dv);
+		const ImVec2 uv4(u - du, v + dv);
+		const ImU32 col = IM_COL32(255, 255, 255, static_cast<int>(std::clamp(transparency + 0.25f, 0.0f, 1.0f) * 255.0f));
+		const ImTextureID tex = reinterpret_cast<ImTextureID>(g_Variables.MapTexture);
+
+		if (cfg->RadarRotate)
+		{
+			draw->AddImageQuad(tex,
+				rp(-width * 0.5f, -height * 0.5f),
+				rp(width * 0.5f, -height * 0.5f),
+				rp(width * 0.5f, height * 0.5f),
+				rp(-width * 0.5f, height * 0.5f),
+				uv1, uv2, uv3, uv4, col);
+		}
+		else
+		{
+			draw->AddImage(tex, min, max, uv1, uv4, col);
+		}
 	}
 	else
 	{
@@ -741,15 +801,21 @@ void Core::Features::cEsp::DrawRadar()
 
 	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
 
-	// Header + cardinal markers.
+	// Header + cardinal markers (rotate with the map).
 	draw->AddRectFilled(min, ImVec2(max.x, min.y + 20.0f), IM_COL32(8, 8, 10, 235), 8.0f, ImDrawFlags_RoundCornersTop);
 	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 4.0f), IM_COL32(205, 50, 65, 255), "RADAR");
-	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, min.y + 24.0f), IM_COL32(255, 255, 255, 220), "N");
-	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, max.y - 30.0f), IM_COL32(255, 255, 255, 140), "S");
-	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 6.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "W");
-	draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(max.x - 14.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "E");
+	{
+		const ImVec2 n = rp(0.0f, -(height * 0.5f - 12.0f));
+		const ImVec2 s = rp(0.0f, height * 0.5f - 12.0f);
+		const ImVec2 w = rp(-(width * 0.5f - 12.0f), 0.0f);
+		const ImVec2 e = rp(width * 0.5f - 12.0f, 0.0f);
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(n.x - 4.0f, n.y - 6.0f), IM_COL32(255, 255, 255, 220), "N");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(s.x - 4.0f, s.y - 6.0f), IM_COL32(255, 255, 255, 140), "S");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(w.x - 4.0f, w.y - 6.0f), IM_COL32(255, 255, 255, 140), "W");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(e.x - 4.0f, e.y - 6.0f), IM_COL32(255, 255, 255, 140), "E");
+	}
 
-	// Player marker (arrow) at the centre.
+	// Player marker (points up; the map rotates beneath it).
 	{
 		const ImVec2 p1(center.x, center.y - 8.0f);
 		const ImVec2 p2(center.x - 5.5f, center.y + 6.0f);
@@ -792,7 +858,7 @@ void Core::Features::cEsp::DrawRadar()
 		if (dist > range)
 			continue;
 
-		const ImVec2 dot{ center.x + dx * scale, center.y - dy * scale };
+		const ImVec2 dot = rp(dx * scale, -dy * scale);
 		if (dot.x < min.x + 2.0f || dot.x > max.x - 2.0f || dot.y < min.y + 2.0f || dot.y > max.y - 2.0f)
 			continue;
 

@@ -313,6 +313,10 @@ namespace Core {
 			inline static float RadarHeight = 220.0f;
 			inline static float RadarZoom = 1.0f;
 			inline static float RadarTransparency = 0.8f;
+			inline static bool RadarRotate = true;
+			inline static float RadarOffsetX = 0.0f;
+			inline static float RadarOffsetY = 0.0f;
+			inline static float RadarMapScale = 1.0f;
 			inline static ImColor RadarPlayerCol{ 255, 255, 255, 255 };
 			inline static ImColor RadarFriendCol{ 255, 204, 0, 255 };
 			inline static ImColor RadarNpcCol{ 160, 160, 160, 255 };
