@@ -724,9 +724,6 @@ void Core::Features::cEsp::DrawRadar()
 	const ImVec2 max{ min.x + width, min.y + height };
 	const ImVec2 center{ min.x + width * 0.5f, min.y + height * 0.5f };
 
-	const float range = std::clamp(cfg->RadarRange, 1.0f, 1000.0f);
-	const float zoom = std::clamp(cfg->RadarZoom, 0.2f, 2.0f);
-	const float crop_half = range / zoom;
 	const float transparency = std::clamp(cfg->RadarTransparency, 0.0f, 1.0f);
 
 	auto* local = Core::SDK::Pointers::pLocalPlayer;
@@ -741,35 +738,24 @@ void Core::Features::cEsp::DrawRadar()
 
 	const D3DXVECTOR3 origin = local->GetPos();
 
-	// Calibrated world bounds for map.png (square map covering the GTA V world).
-	constexpr float MAP_MIN_X = -6390.0f;
-	constexpr float MAP_MAX_X = 7110.0f;
-	constexpr float MAP_MIN_Y = -3824.0f;
-	constexpr float MAP_MAX_Y = 8648.0f;
+	// Exact world bounds for map.png, derived from the map's own coordinate grid:
+	// the drawn grid is 100 world units per 66 master pixels (8192 px master),
+	// and the red major axes sit on world X=0 / Y=0 at master px (3755.5, 5524.5).
+	//   unitsPerPixel = 100 / 66
+	//   x = (px - 3755.5) * unitsPerPixel
+	//   y = (5524.5 - py) * unitsPerPixel
+	constexpr float MAP_MIN_X = -5689.85f;
+	constexpr float MAP_MAX_X = 6721.97f;
+	constexpr float MAP_MIN_Y = -4041.67f;
+	constexpr float MAP_MAX_Y = 8370.45f;
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
-	const float map_scale = std::clamp(cfg->RadarMapScale, 0.5f, 1.5f);
-	const float effective_crop = crop_half / map_scale;
-	const float scale = (std::min(width, height) * 0.5f) / effective_crop;
-
-	// Smooth the heading so rotation is fluid instead of stepping every sample.
-	static float smooth_heading = 0.0f;
-	{
-		const float target = get_entity_heading(reinterpret_cast<uintptr_t>(local));
-		float diff = target - smooth_heading;
-		while (diff > 180.0f) diff -= 360.0f;
-		while (diff < -180.0f) diff += 360.0f;
-		smooth_heading += diff * std::clamp(ImGui::GetIO().DeltaTime * 12.0f, 0.0f, 1.0f);
-		if (smooth_heading < 0.0f) smooth_heading += 360.0f;
-		if (smooth_heading >= 360.0f) smooth_heading -= 360.0f;
-	}
-
-	const float ang = cfg->RadarRotate ? (-smooth_heading * 3.14159265358979f / 180.0f) : 0.0f;
-	const float ca = std::cos(ang);
-	const float sa = std::sin(ang);
-	auto rp = [&](float x, float y) {
-		return ImVec2(center.x + x * ca - y * sa, center.y + x * sa + y * ca);
+	// Static full-map radar: the map is fixed and the player/enemy blips move.
+	auto world_to_panel = [&](float wx, float wy) {
+		const float nx = (wx + cfg->RadarOffsetX - MAP_MIN_X) / MAP_W;
+		const float ny = (MAP_MAX_Y - (wy + cfg->RadarOffsetY)) / MAP_H;
+		return ImVec2(min.x + nx * width, min.y + ny * height);
 	};
 
 	draw->PushClipRect(min, max, true);
@@ -777,43 +763,9 @@ void Core::Features::cEsp::DrawRadar()
 
 	if (g_Variables.MapTexture != nullptr)
 	{
-		const float cx = origin.x + cfg->RadarOffsetX;
-		const float cy = origin.y + cfg->RadarOffsetY;
-		const float u = (cx - MAP_MIN_X) / MAP_W;
-		const float v = (MAP_MAX_Y - cy) / MAP_H;
-		const float du = effective_crop / MAP_W;
-		const float dv = effective_crop / MAP_H;
-
-		const ImVec2 uv1(u - du, v - dv);
-		const ImVec2 uv2(u + du, v - dv);
-		const ImVec2 uv3(u + du, v + dv);
-		const ImVec2 uv4(u - du, v + dv);
 		const ImU32 col = IM_COL32(255, 255, 255, static_cast<int>(std::clamp(transparency + 0.25f, 0.0f, 1.0f) * 255.0f));
-		const ImTextureID tex = reinterpret_cast<ImTextureID>(g_Variables.MapTexture);
-
-		if (cfg->RadarRotate)
-		{
-			// Overdraw by 1.5x so the rotated quad fully covers the panel corners
-			// (scale quad and UVs equally, so the visible map scale is unchanged).
-			constexpr float COVER = 1.5f;
-			const float hw = width * 0.5f * COVER;
-			const float hh = height * 0.5f * COVER;
-			const float duc = du * COVER;
-			const float dvc = dv * COVER;
-
-			draw->AddImageQuad(tex,
-				rp(-hw, -hh),
-				rp(hw, -hh),
-				rp(hw, hh),
-				rp(-hw, hh),
-				ImVec2(u - duc, v - dvc), ImVec2(u + duc, v - dvc),
-				ImVec2(u + duc, v + dvc), ImVec2(u - duc, v + dvc),
-				col);
-		}
-		else
-		{
-			draw->AddImage(tex, min, max, uv1, uv4, col);
-		}
+		draw->AddImage(reinterpret_cast<ImTextureID>(g_Variables.MapTexture), min, max,
+			ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), col);
 	}
 	else
 	{
@@ -839,21 +791,18 @@ void Core::Features::cEsp::DrawRadar()
 			IM_COL32(180, 180, 180, 210), coords);
 	}
 	{
-		const ImVec2 n = rp(0.0f, -(height * 0.5f - 12.0f));
-		const ImVec2 s = rp(0.0f, height * 0.5f - 12.0f);
-		const ImVec2 w = rp(-(width * 0.5f - 12.0f), 0.0f);
-		const ImVec2 e = rp(width * 0.5f - 12.0f, 0.0f);
-		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(n.x - 4.0f, n.y - 6.0f), IM_COL32(255, 255, 255, 220), "N");
-		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(s.x - 4.0f, s.y - 6.0f), IM_COL32(255, 255, 255, 140), "S");
-		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(w.x - 4.0f, w.y - 6.0f), IM_COL32(255, 255, 255, 140), "W");
-		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(e.x - 4.0f, e.y - 6.0f), IM_COL32(255, 255, 255, 140), "E");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, min.y + 24.0f), IM_COL32(255, 255, 255, 220), "N");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(center.x - 4.0f, max.y - 16.0f), IM_COL32(255, 255, 255, 140), "S");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 6.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "W");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(max.x - 14.0f, center.y - 7.0f), IM_COL32(255, 255, 255, 140), "E");
 	}
 
-	// Player marker (points up; the map rotates beneath it).
+	// Player blip (moves on the fixed map).
 	{
-		const ImVec2 p1(center.x, center.y - 8.0f);
-		const ImVec2 p2(center.x - 5.5f, center.y + 6.0f);
-		const ImVec2 p3(center.x + 5.5f, center.y + 6.0f);
+		const ImVec2 pp = world_to_panel(origin.x, origin.y);
+		const ImVec2 p1(pp.x, pp.y - 7.0f);
+		const ImVec2 p2(pp.x - 5.0f, pp.y + 5.0f);
+		const ImVec2 p3(pp.x + 5.0f, pp.y + 5.0f);
 		draw->AddTriangleFilled(p1, p2, p3, IM_COL32(205, 50, 65, 255));
 		draw->AddTriangle(p1, p2, p3, IM_COL32(255, 255, 255, 235), 1.2f);
 	}
@@ -889,10 +838,10 @@ void Core::Features::cEsp::DrawRadar()
 		const float dx = entity.Pos.x - origin.x;
 		const float dy = entity.Pos.y - origin.y;
 		const float dist = std::sqrt(dx * dx + dy * dy);
-		if (dist > range)
-			continue;
 
-		const ImVec2 dot = rp(dx * scale, -dy * scale);
+		// Full-map radar shows the whole world, so no distance cull; blips that
+		// fall outside the map rectangle are skipped by the bounds check below.
+		const ImVec2 dot = world_to_panel(entity.Pos.x, entity.Pos.y);
 		if (dot.x < min.x + 2.0f || dot.x > max.x - 2.0f || dot.y < min.y + 2.0f || dot.y > max.y - 2.0f)
 			continue;
 
@@ -919,7 +868,7 @@ void Core::Features::cEsp::DrawRadar()
 	}
 
 	if (drawn == 0)
-		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 8.0f, min.y + 22.0f), IM_COL32(200, 200, 200, 220), "No entities in range");
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 8.0f, max.y - 20.0f), IM_COL32(200, 200, 200, 200), "No entities on map");
 }
 
 namespace
