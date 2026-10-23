@@ -459,6 +459,18 @@ namespace Core {
 			inline static float VehicleColorB = 1.0f;
 			inline static float Boost = 1.f;
 			inline static float FakeLagDelay = 1000;
+
+			// Combat perks
+			inline static bool SuperPunchEnabled;
+			inline static float SuperPunchMultiplier = 25.0f;
+			inline static bool ExplosiveMeleeEnabled;
+			inline static bool ExplosiveAmmoEnabled;
+			inline static bool StickToGroundEnabled;
+
+			// Chaos tab
+			inline static bool ChaosUnusableVehicles;
+			inline static int ChaosSpamCount = 20;
+			inline static float ChaosRadius = 14.0f;
 		} *Player;
 
 		nlohmann::json ImColToJson(const ImColor& Col) {
@@ -943,6 +955,14 @@ namespace Core {
 			PlayerCfg["RegenerateArmor"] = Player->RegenerateArmor;
 			PlayerCfg["FakeLag"] = Player->FakeLag;
 			PlayerCfg["VisibleRepair"] = Player->VisibleRepair;
+			PlayerCfg["SuperPunchEnabled"] = Player->SuperPunchEnabled;
+			PlayerCfg["SuperPunchMultiplier"] = Player->SuperPunchMultiplier;
+			PlayerCfg["ExplosiveMeleeEnabled"] = Player->ExplosiveMeleeEnabled;
+			PlayerCfg["ExplosiveAmmoEnabled"] = Player->ExplosiveAmmoEnabled;
+			PlayerCfg["StickToGroundEnabled"] = Player->StickToGroundEnabled;
+			PlayerCfg["ChaosUnusableVehicles"] = Player->ChaosUnusableVehicles;
+			PlayerCfg["ChaosSpamCount"] = Player->ChaosSpamCount;
+			PlayerCfg["ChaosRadius"] = Player->ChaosRadius;
 			PlayerCfg["VehicleRain"] = Player->VehicleRain;
 			PlayerCfg["HornetBoost"] = Player->HornetBoost;
 			PlayerCfg["VehicleJump"] = Player->VehicleJump;
@@ -1319,6 +1339,14 @@ namespace Core {
 				Player->RegenerateArmor = PlayerCfg.value("RegenerateArmor", Player->RegenerateArmor);
 				Player->FakeLag = PlayerCfg.value("FakeLag", Player->FakeLag);
 				Player->VisibleRepair = PlayerCfg.value("VisibleRepair", Player->VisibleRepair);
+				Player->SuperPunchEnabled = PlayerCfg.value("SuperPunchEnabled", Player->SuperPunchEnabled);
+				Player->SuperPunchMultiplier = PlayerCfg.value("SuperPunchMultiplier", Player->SuperPunchMultiplier);
+				Player->ExplosiveMeleeEnabled = PlayerCfg.value("ExplosiveMeleeEnabled", Player->ExplosiveMeleeEnabled);
+				Player->ExplosiveAmmoEnabled = PlayerCfg.value("ExplosiveAmmoEnabled", Player->ExplosiveAmmoEnabled);
+				Player->StickToGroundEnabled = PlayerCfg.value("StickToGroundEnabled", Player->StickToGroundEnabled);
+				Player->ChaosUnusableVehicles = PlayerCfg.value("ChaosUnusableVehicles", Player->ChaosUnusableVehicles);
+				Player->ChaosSpamCount = PlayerCfg.value("ChaosSpamCount", Player->ChaosSpamCount);
+				Player->ChaosRadius = PlayerCfg.value("ChaosRadius", Player->ChaosRadius);
 				Player->VehicleRain = PlayerCfg.value("VehicleRain", Player->VehicleRain);
 				Player->HornetBoost = PlayerCfg.value("HornetBoost", Player->HornetBoost);
 				Player->VehicleJump = PlayerCfg.value("VehicleJump", Player->VehicleJump);

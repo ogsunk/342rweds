@@ -1752,6 +1752,7 @@ namespace {
     bool native_set_entity_velocity(uintptr_t entity, float x, float y, float z);
     bool native_freeze_entity(uintptr_t entity, bool freeze);
     void queue_player_impulse(CPed* ped, const D3DXVECTOR3& velocity, ULONGLONG duration_ms = 400);
+    bool taze_ped(uintptr_t ped_address);
 
     bool is_player_frozen(uintptr_t ped) {
         std::lock_guard<std::mutex> lock(Core::SDK::Game::FrozenPlayersMutex);
@@ -2690,6 +2691,14 @@ namespace {
                         action_button("Launch", "Launch Player", [&] { launch_player(selected_player); });
                         action_button("Sky TP", "Sky Teleport Player", [&] { sky_teleport_player(selected_player); });
                         action_button("Ragdoll", "Knock Player Down", [&] { force_ragdoll_player(selected_player); });
+                        action_button("Taze", "Taze Player", [&] {
+                            if (!taze_ped(reinterpret_cast<uintptr_t>(selected_player.Ped))) {
+                                NotifyManager::Send("Taze unavailable", 220.0f);
+                            }
+                            else {
+                                NotifyManager::Send("Player tazed", 220.0f);
+                            }
+                            });
                         action_button("Burn", "Burn Player", [&] {
                             if (!native_burn_player(selected_player)) {
                                 NotifyManager::Send("Burn native unavailable", 220.0f);
@@ -3069,6 +3078,435 @@ namespace {
 
         vehicle.Pointer->Fix(1000.0f);
         NotifyManager::Send("Vehicle repaired", 220.0f);
+    }
+
+    // ------------------------------------------------------------------
+    // Chaos tab
+    // ------------------------------------------------------------------
+    uint32_t joaat_hash(const char* text) {
+        uint32_t hash = 0;
+        while (*text) {
+            hash += static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(*text++)));
+            hash += hash << 10;
+            hash ^= hash >> 6;
+        }
+        hash += hash << 3;
+        hash ^= hash >> 11;
+        hash += hash << 15;
+        return hash;
+    }
+
+    bool chaos_natives_ready() {
+        return !g_Config.General->SafeMode && Core::Features::NativeCaller::IsAvailable();
+    }
+
+    bool ensure_model_loaded(uint32_t model_hash, int timeout_ms = 5000) {
+        if (!model_hash || !chaos_natives_ready()) {
+            return false;
+        }
+
+        Core::Features::NativeCaller::InvokeNative(0x963D27A58DF860ACull, { model_hash });
+
+        const ULONGLONG start = GetTickCount64();
+        while (GetTickCount64() - start < static_cast<ULONGLONG>(timeout_ms)) {
+            uint64_t loaded = 0;
+            if (Core::Features::NativeCaller::InvokeNative(0x98A4EB5D89A0C952ull, { model_hash }, &loaded) && loaded) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+
+        return false;
+    }
+
+    std::vector<Core::SDK::Game::VehicleStructure> snapshot_vehicles() {
+        std::lock_guard<std::mutex> lock(Core::SDK::Game::VehicleMutex);
+        return Core::SDK::Game::VehicleList;
+    }
+
+    void chaos_spam_cars(int count, float radius) {
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local) {
+            NotifyManager::Send("No local player", 220.0f);
+            return;
+        }
+
+        if (!chaos_natives_ready()) {
+            NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
+            return;
+        }
+
+        static const char* car_models[] = {
+            "adder", "zentorno", "sultan", "comet2", "banshee", "turismor",
+            "insurgent", "police", "taxi", "firetruk", "blista", "dominator"
+        };
+
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_int_distribution<int> model_pick(
+            0, static_cast<int>(sizeof(car_models) / sizeof(car_models[0])) - 1);
+
+        const uint32_t model_hash = joaat_hash(car_models[model_pick(rng)]);
+        const D3DXVECTOR3 origin = local->GetPos();
+        const int spawn_count = std::clamp(count, 1, 40);
+        const float spawn_radius = std::clamp(radius, 5.0f, 40.0f);
+
+        std::thread([spawn_count, spawn_radius, model_hash, origin] {
+            if (!ensure_model_loaded(model_hash)) {
+                return;
+            }
+
+            static std::mt19937 local_rng(std::random_device{}());
+            std::uniform_real_distribution<float> angle_dist(0.0f, 6.2831853f);
+            std::uniform_real_distribution<float> radius_dist(3.0f, spawn_radius);
+
+            for (int i = 0; i < spawn_count; ++i) {
+                const float angle = angle_dist(local_rng);
+                const float distance = radius_dist(local_rng);
+                const float x = origin.x + std::cos(angle) * distance;
+                const float y = origin.y + std::sin(angle) * distance;
+                const float z = origin.z + 0.75f;
+                const float heading = angle_dist(local_rng) * 57.29578f;
+
+                uint64_t vehicle = 0;
+                Core::Features::NativeCaller::InvokeNative(
+                    0xAF35D0D2583051B0ull,
+                    {
+                        model_hash,
+                        Core::Features::NativeCaller::FloatBits(x),
+                        Core::Features::NativeCaller::FloatBits(y),
+                        Core::Features::NativeCaller::FloatBits(z),
+                        Core::Features::NativeCaller::FloatBits(heading),
+                        1ull,
+                        0ull
+                    },
+                    &vehicle);
+
+                if (vehicle) {
+                    Core::Features::NativeCaller::InvokeNative(0x49733E92263139D1ull, { vehicle });
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(70));
+            }
+
+            Core::Features::NativeCaller::InvokeNative(0xE532F5D78798DAABull, { model_hash });
+        }).detach();
+
+        NotifyManager::Send("Spamming cars...", 220.0f);
+    }
+
+    void chaos_spam_peds(int count, float radius) {
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local) {
+            NotifyManager::Send("No local player", 220.0f);
+            return;
+        }
+
+        if (!chaos_natives_ready()) {
+            NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
+            return;
+        }
+
+        static const char* ped_models[] = {
+            "a_m_y_skater_01", "a_m_y_business_01", "a_m_m_bevhills_01",
+            "a_f_y_hipster_01", "a_m_y_hipster_02", "a_m_m_farmer_01"
+        };
+
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_int_distribution<int> model_pick(
+            0, static_cast<int>(sizeof(ped_models) / sizeof(ped_models[0])) - 1);
+
+        const uint32_t model_hash = joaat_hash(ped_models[model_pick(rng)]);
+        const D3DXVECTOR3 origin = local->GetPos();
+        const int spawn_count = std::clamp(count, 1, 60);
+        const float spawn_radius = std::clamp(radius, 4.0f, 40.0f);
+
+        std::thread([spawn_count, spawn_radius, model_hash, origin] {
+            if (!ensure_model_loaded(model_hash)) {
+                return;
+            }
+
+            static std::mt19937 local_rng(std::random_device{}());
+            std::uniform_real_distribution<float> angle_dist(0.0f, 6.2831853f);
+            std::uniform_real_distribution<float> radius_dist(2.5f, spawn_radius);
+
+            for (int i = 0; i < spawn_count; ++i) {
+                const float angle = angle_dist(local_rng);
+                const float distance = radius_dist(local_rng);
+                const float x = origin.x + std::cos(angle) * distance;
+                const float y = origin.y + std::sin(angle) * distance;
+                const float z = origin.z + 0.5f;
+                const float heading = angle_dist(local_rng) * 57.29578f;
+
+                Core::Features::NativeCaller::InvokeNative(
+                    0xD49F9B0955C367DEull,
+                    {
+                        4ull, // civilian male
+                        model_hash,
+                        Core::Features::NativeCaller::FloatBits(x),
+                        Core::Features::NativeCaller::FloatBits(y),
+                        Core::Features::NativeCaller::FloatBits(z),
+                        Core::Features::NativeCaller::FloatBits(heading),
+                        1ull,
+                        0ull
+                    });
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            }
+
+            Core::Features::NativeCaller::InvokeNative(0xE532F5D78798DAABull, { model_hash });
+        }).detach();
+
+        NotifyManager::Send("Spamming peds...", 220.0f);
+    }
+
+    bool taze_ped(uintptr_t ped_address) {
+        if (!ped_address || !chaos_natives_ready()) {
+            return false;
+        }
+
+        auto* ped = reinterpret_cast<CPed*>(ped_address);
+        D3DXVECTOR3 target = ped->GetPos();
+        target.z += 0.35f;
+
+        D3DXVECTOR3 start = target;
+        start.z += 2.2f;
+
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        const uint32_t owner_handle = local
+            ? Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local))
+            : 0;
+
+        const uint32_t stungun_hash = joaat_hash("weapon_stungun");
+
+        const std::vector<uint64_t> args = {
+            Core::Features::NativeCaller::FloatBits(start.x),
+            Core::Features::NativeCaller::FloatBits(start.y),
+            Core::Features::NativeCaller::FloatBits(start.z),
+            Core::Features::NativeCaller::FloatBits(target.x),
+            Core::Features::NativeCaller::FloatBits(target.y),
+            Core::Features::NativeCaller::FloatBits(target.z),
+            1ull,                       // damage
+            static_cast<uint64_t>(stungun_hash),
+            static_cast<uint64_t>(owner_handle),
+            0ull,                       // isAudible
+            1ull,                       // isInvisible
+            0ull,                       // isP2P
+            Core::Features::NativeCaller::FloatBits(2.0f)
+        };
+
+        return Core::Features::NativeCaller::InvokeNative(0x867654CBC7606F2Cull, args);
+    }
+
+    void chaos_taze_everyone(float radius) {
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local || !chaos_natives_ready()) {
+            NotifyManager::Send("Natives unavailable (Safe Mode?)", 220.0f);
+            return;
+        }
+
+        const auto& entities = Core::SDK::Game::GetEntityListSnapshotCached();
+        int affected = 0;
+
+        for (const auto& entity : entities) {
+            if (!entity.Ped || entity.Ped == local) {
+                continue;
+            }
+            if (entity.Distance > std::clamp(radius, 5.0f, 60.0f)) {
+                continue;
+            }
+            if (affected >= 20) {
+                break;
+            }
+
+            if (taze_ped(reinterpret_cast<uintptr_t>(entity.Ped))) {
+                ++affected;
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
+
+        NotifyManager::Send("Tazed " + std::to_string(affected) + " peds", 220.0f);
+    }
+
+    void chaos_ragdoll_everyone(float radius) {
+        auto* local = Core::SDK::Pointers::pLocalPlayer;
+        if (!local) {
+            NotifyManager::Send("No local player", 220.0f);
+            return;
+        }
+
+        const auto& entities = Core::SDK::Game::GetEntityListSnapshotCached();
+        int affected = 0;
+
+        for (const auto& entity : entities) {
+            if (!entity.Ped || entity.Ped == local) {
+                continue;
+            }
+            if (entity.Distance > std::clamp(radius, 5.0f, 60.0f)) {
+                continue;
+            }
+            if (affected >= 30) {
+                break;
+            }
+
+            const uintptr_t ped_address = reinterpret_cast<uintptr_t>(entity.Ped);
+
+            // Task natives crash off-thread, so clear the ragdoll blockers
+            // and knock the ped over physically instead.
+            entity.Ped->NoRagDoll(false);
+            entity.Ped->SetConfigFlag(ePedConfigFlag::ActivateRagdollFromMinorPlayerContact, true);
+            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromAnyPedImpact, false);
+            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromMelee, false);
+            entity.Ped->SetConfigFlag(ePedConfigFlag::DontActivateRagdollFromBulletImpact, false);
+
+            static std::mt19937 rng(std::random_device{}());
+            std::uniform_real_distribution<float> dist(-4.0f, 4.0f);
+
+            D3DXVECTOR3 velocity = entity.Ped->GetVelocity();
+            velocity.x += dist(rng);
+            velocity.y += dist(rng);
+            velocity.z += 8.0f;
+
+            Mem.Write<D3DXVECTOR3>(ped_address + 0x320, velocity);
+            queue_entity_velocity_hold(ped_address, velocity, 350);
+            ++affected;
+        }
+
+        NotifyManager::Send("Ragdolled " + std::to_string(affected) + " peds", 220.0f);
+    }
+
+    void chaos_destroy_cars(float radius) {
+        int affected = 0;
+
+        for (const auto& vehicle : snapshot_vehicles()) {
+            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+                continue;
+            }
+            if (affected >= 40) {
+                break;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            if (g_Offsets.m_VehicleEngineHealth) {
+                Mem.Write<float>(address + g_Offsets.m_VehicleEngineHealth, -4000.0f);
+            }
+            if (g_Offsets.m_VehicleBodyHealth) {
+                Mem.Write<float>(address + g_Offsets.m_VehicleBodyHealth, 0.0f);
+            }
+            ++affected;
+        }
+
+        NotifyManager::Send("Destroyed " + std::to_string(affected) + " cars", 220.0f);
+    }
+
+    void chaos_freeze_cars(float radius) {
+        int affected = 0;
+
+        for (const auto& vehicle : snapshot_vehicles()) {
+            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+                continue;
+            }
+            if (affected >= 25) {
+                break;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+            if (!native_freeze_entity(address, true)) {
+                Mem.Write<uint8_t>(address + 0x2E, 1);
+            }
+            ++affected;
+        }
+
+        NotifyManager::Send("Froze " + std::to_string(affected) + " cars", 220.0f);
+    }
+
+    void chaos_void_cars(float radius) {
+        int affected = 0;
+
+        for (const auto& vehicle : snapshot_vehicles()) {
+            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+                continue;
+            }
+            if (affected >= 25) {
+                break;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            D3DXVECTOR3 position = vehicle.Pointer->GetPos();
+            position.z = -250.0f;
+
+            vehicle.Pointer->Fix(0);
+            vehicle.Pointer->SetPos(position);
+            Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+            ++affected;
+        }
+
+        NotifyManager::Send("Voided " + std::to_string(affected) + " cars", 220.0f);
+    }
+
+    void chaos_flip_cars(float radius) {
+        int affected = 0;
+
+        for (const auto& vehicle : snapshot_vehicles()) {
+            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+                continue;
+            }
+            if (affected >= 25) {
+                break;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            D3DXMATRIX matrix = Mem.Read<D3DXMATRIX>(address + 0x60);
+
+            // 180-degree roll around the forward axis.
+            matrix._11 = -matrix._11;
+            matrix._12 = -matrix._12;
+            matrix._13 = -matrix._13;
+            matrix._31 = -matrix._31;
+            matrix._32 = -matrix._32;
+            matrix._33 = -matrix._33;
+
+            D3DXVECTOR3 position = vehicle.Pointer->GetPos();
+            position.z += 2.5f;
+            matrix._41 = position.x;
+            matrix._42 = position.y;
+            matrix._43 = position.z;
+            matrix._44 = 1.0f;
+
+            Mem.Write<D3DXMATRIX>(address + 0x60, matrix);
+            vehicle.Pointer->Fix(1000.0f);
+            Mem.Write<D3DXVECTOR3>(address + 0x320, D3DXVECTOR3{ 0.0f, 0.0f, 0.0f });
+            ++affected;
+        }
+
+        NotifyManager::Send("Flipped " + std::to_string(affected) + " cars", 220.0f);
+    }
+
+    void chaos_launch_cars(float radius) {
+        int affected = 0;
+
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_real_distribution<float> lateral(-10.0f, 10.0f);
+
+        for (const auto& vehicle : snapshot_vehicles()) {
+            if (!vehicle.Pointer || vehicle.Dist > std::clamp(radius, 5.0f, 80.0f)) {
+                continue;
+            }
+            if (affected >= 15) {
+                break;
+            }
+
+            const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle.Pointer);
+            const D3DXVECTOR3 velocity{ lateral(rng), lateral(rng), 32.0f };
+
+            Mem.Write<uint8_t>(address + 0x2E, 0);
+            Mem.Write<D3DXVECTOR3>(address + 0x320, velocity);
+            queue_entity_velocity_hold(address, velocity, 350);
+            native_set_entity_velocity(address, velocity.x, velocity.y, velocity.z);
+            ++affected;
+        }
+
+        NotifyManager::Send("Launched " + std::to_string(affected) + " cars", 220.0f);
     }
 
     void toggle_vehicle_lock(const Core::SDK::Game::VehicleStructure& vehicle) {
@@ -5399,7 +5837,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" }, { I_CURRENT__LOCATION, "Radar" } } },
         { I_USER__COG, "Player List", { { I_USER, "Player List" }, { I_HEART, "Friend List" } } },
         { I_CAR, "Vehicle List", {  } },
-        { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" } } },
+        { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" }, { I_WAVE__SAW__TOOL, "Chaos" } } },
         { I_FOLDER__COG, "Configs", {  } },
         { I_WAVE__SAW__TOOL, "Settings", { { I_SETTINGS, "General" }, { I_TARGET, "Crosshair" } } },
     };
@@ -6472,6 +6910,15 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                         set_local_no_ragdoll(no_ragdoll);
                     }
 
+                    widgets->checkbox(I_SWORD, "Super Punch", &g_Config.Player->SuperPunchEnabled);
+                    if (g_Config.Player->SuperPunchEnabled) {
+                        widgets->sliderfloat(I_GRADIENTER, "Punch Power", &g_Config.Player->SuperPunchMultiplier, 1.0f, 500.0f, "%.0fx");
+                    }
+                    widgets->checkbox(I_TARGET, "Explosive Ammo", &g_Config.Player->ExplosiveAmmoEnabled);
+                    widgets->checkbox(I_TARGET, "Explosive Melee", &g_Config.Player->ExplosiveMeleeEnabled);
+                    widgets->checkbox(I_EYE__COG, "Invisible", &g_Config.Player->Invisible);
+                    widgets->checkbox(I_CURRENT__LOCATION, "Stick To Ground", &g_Config.Player->StickToGroundEnabled);
+
                     bool steal_car = g_Config.Player->StealCarEnabled;
                     if (widgets->checkbox(I_CAR, "Steal Car", &steal_car)) {
                         set_local_steal_car(steal_car);
@@ -6883,6 +7330,107 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                             NotifyManager::Send("Weapon native unavailable", 220.0f);
                         }
                     }
+                }
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+        });
+
+    widgets->nav.addpage(4, [&] {
+        auto* local_player = Core::SDK::Pointers::pLocalPlayer;
+
+        const float misc_content_width = GetContentRegionAvail().x;
+        const float misc_column_gap = 8.f ds;
+        const float misc_column_width = (misc_content_width - misc_column_gap) * 0.5f;
+        const float misc_row_y = GetCursorPosY();
+
+        const float chaos_effect_radius = g_Config.Player->ChaosRadius + 12.0f;
+
+        SetCursorPosX(misc_column_width + misc_column_gap);
+        BeginGroup();
+        {
+            widgets->child.begin(I_WAVE__SAW__TOOL, "Chaos Options", 1, { misc_column_width, 312 ds });
+            {
+                if (!local_player) {
+                    draw_player_empty_state(I_WAVE__SAW__TOOL, "No Local Player", "Wait until the local player is available.");
+                }
+                else {
+                    const float button_width = GetContentRegionAvail().x;
+                    PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
+                    PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
+                    PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
+                    PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.28f).vec4());
+
+                    if (widgets->button("Spam Cars", { button_width, 30 ds })) {
+                        chaos_spam_cars(g_Config.Player->ChaosSpamCount, g_Config.Player->ChaosRadius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Spam Peds", { button_width, 30 ds })) {
+                        chaos_spam_peds(g_Config.Player->ChaosSpamCount, g_Config.Player->ChaosRadius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Ragdoll Everyone", { button_width, 30 ds })) {
+                        chaos_ragdoll_everyone(chaos_effect_radius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Taze Everyone", { button_width, 30 ds })) {
+                        chaos_taze_everyone(chaos_effect_radius);
+                    }
+
+                    PopStyleColor(3);
+                    PopStyleVar();
+
+                    widgets->spacing(8 ds);
+                    widgets->sliderint(I_GRADIENTER, "Spawn Count", &g_Config.Player->ChaosSpamCount, 1, 60, "%d");
+                    widgets->sliderfloat(I_GRADIENTER, "Radius", &g_Config.Player->ChaosRadius, 5.0f, 40.0f, "%.0fm");
+                }
+            }
+            widgets->child.end();
+        }
+        EndGroup();
+
+        SetCursorPos({ 0, misc_row_y });
+
+        BeginGroup();
+        {
+            widgets->child.begin(I_CAR, "Destroy Options", 2, { misc_column_width, 312 ds });
+            {
+                if (!local_player) {
+                    draw_player_empty_state(I_CAR, "No Local Player", "Wait until the local player is available.");
+                }
+                else {
+                    const float button_width = GetContentRegionAvail().x;
+                    PushStyleVar(ImGuiStyleVar_FrameRounding, 7 ds);
+                    PushStyleColor(ImGuiCol_Button, g_style->col(pcol_bg3).vec4());
+                    PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
+                    PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.28f).vec4());
+
+                    if (widgets->button("Destroy Cars", { button_width, 30 ds })) {
+                        chaos_destroy_cars(chaos_effect_radius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Freeze Cars", { button_width, 30 ds })) {
+                        chaos_freeze_cars(chaos_effect_radius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Void Cars", { button_width, 30 ds })) {
+                        chaos_void_cars(chaos_effect_radius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Flip Cars", { button_width, 30 ds })) {
+                        chaos_flip_cars(chaos_effect_radius);
+                    }
+                    widgets->spacing(4 ds);
+                    if (widgets->button("Launch Cars", { button_width, 30 ds })) {
+                        chaos_launch_cars(chaos_effect_radius);
+                    }
+
+                    PopStyleColor(3);
+                    PopStyleVar();
+
+                    widgets->spacing(8 ds);
+                    widgets->checkbox(I_CAR, "Unusable Vehicles", &g_Config.Player->ChaosUnusableVehicles);
                 }
             }
             widgets->child.end();

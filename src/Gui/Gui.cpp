@@ -343,6 +343,128 @@ void Gui::Rendering()
 		}
 	}
 
+	// ---------------------------------------------------------------------
+	// Extra self perks. These run every frame regardless of which window is
+	// focused, so they keep working while the menu is open.
+	// ---------------------------------------------------------------------
+	if (Core::HasLocalPlayerCached() && Core::SDK::Pointers::pLocalPlayer &&
+		!g_Config.General->SafeMode)
+	{
+		auto* local = Core::SDK::Pointers::pLocalPlayer;
+		auto* cfg = g_Config.Player;
+		const ULONGLONG now = GetTickCount64();
+		const uint32_t local_handle = Core::Features::NativeCaller::PointerToHandle(reinterpret_cast<uintptr_t>(local));
+		const int player_index = local->GetID();
+
+		// Super punch: scales melee damage. Re-applied because switching
+		// weapons can reset the modifier.
+		{
+			static bool last_enabled = false;
+			static float last_multiplier = -1.0f;
+			static ULONGLONG last_apply = 0;
+
+			const bool changed =
+				cfg->SuperPunchEnabled != last_enabled ||
+				(cfg->SuperPunchEnabled && std::fabs(cfg->SuperPunchMultiplier - last_multiplier) > 0.01f);
+
+			if (changed || (cfg->SuperPunchEnabled && now - last_apply > 2000))
+			{
+				const float multiplier = cfg->SuperPunchEnabled
+					? std::clamp(cfg->SuperPunchMultiplier, 1.0f, 5000.0f)
+					: 1.0f;
+
+				Core::Features::NativeCaller::InvokeNative(
+					0x4A3DC7ECCC321032ull,
+					{ static_cast<uint64_t>(player_index), Core::Features::NativeCaller::FloatBits(multiplier) });
+
+				last_enabled = cfg->SuperPunchEnabled;
+				last_multiplier = cfg->SuperPunchMultiplier;
+				last_apply = now;
+			}
+		}
+
+		// Invisible (local entity visibility).
+		{
+			static bool last_invisible = false;
+			static ULONGLONG last_apply = 0;
+
+			const bool changed = cfg->Invisible != last_invisible;
+			if (changed || (cfg->Invisible && now - last_apply > 1000))
+			{
+				if (local_handle)
+				{
+					Core::Features::NativeCaller::InvokeNative(
+						0xEA1C610A04DB6BBBull,
+						{ local_handle, cfg->Invisible ? 0ull : 1ull });
+				}
+				last_invisible = cfg->Invisible;
+				last_apply = now;
+			}
+		}
+
+		// Explosive ammo / melee are "this frame" flags, so they must be set
+		// every frame while enabled.
+		if (cfg->ExplosiveAmmoEnabled)
+		{
+			Core::Features::NativeCaller::InvokeNative(
+				0xA66C71C98D5F2CFBull, { static_cast<uint64_t>(player_index) });
+		}
+
+		if (cfg->ExplosiveMeleeEnabled)
+		{
+			Core::Features::NativeCaller::InvokeNative(
+				0xFF1BED81BFDC0FE0ull, { static_cast<uint64_t>(player_index) });
+		}
+
+		// Stick to ground: measure height above ground and kill upward motion
+		// so explosions/impacts cannot launch you into the air.
+		if (cfg->StickToGroundEnabled && !local->InVehicle())
+		{
+			static float height_above_ground = 0.0f;
+			static ULONGLONG last_measure = 0;
+
+			if (now - last_measure > 50)
+			{
+				uint64_t bits = 0;
+				if (local_handle &&
+					Core::Features::NativeCaller::InvokeNative(
+						0x1F2AA07F00B3217Aull, { local_handle }, &bits))
+				{
+					const uint32_t raw = static_cast<uint32_t>(bits);
+					std::memcpy(&height_above_ground, &raw, sizeof(float));
+					last_measure = now;
+				}
+			}
+
+			if (height_above_ground > 0.35f)
+			{
+				D3DXVECTOR3 velocity = local->GetVelocity();
+				if (velocity.z > -4.0f)
+				{
+					velocity.z = -14.0f;
+					Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(local) + 0x320, velocity);
+				}
+			}
+		}
+
+		// Unusable Vehicles: every car you enter loses its engine.
+		if (cfg->ChaosUnusableVehicles && local->InVehicle())
+		{
+			auto* vehicle = local->GetLastVehicle();
+			if (vehicle && g_Offsets.m_VehicleEngineHealth)
+			{
+				static ULONGLONG last_disable = 0;
+				if (now - last_disable > 250)
+				{
+					Mem.Write<float>(
+						reinterpret_cast<uintptr_t>(vehicle) + g_Offsets.m_VehicleEngineHealth,
+						-4000.0f);
+					last_disable = now;
+				}
+			}
+		}
+	}
+
 	// Radar and Misc ESP render unconditionally so they do not depend on the
 	// game window being the foreground window or on the ESP master toggle.
 	Features::g_Esp.DrawRadar();
