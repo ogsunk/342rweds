@@ -478,6 +478,8 @@ void Gui::Rendering()
 			static uintptr_t last_weapon_info = 0;
 			static uint32_t original_damage = 0;
 			static bool damage_applied = false;
+			static float original_reload[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			static bool reload_applied = false;
 
 			auto* weapon_manager = local->GetWeaponManager();
 			auto* weapon_info = weapon_manager ? weapon_manager->GetWeaponInfo() : nullptr;
@@ -490,6 +492,12 @@ void Gui::Rendering()
 					last_weapon_info = info;
 					original_damage = Mem.Read<uint32_t>(info + 0x120);
 					damage_applied = false;
+
+					original_reload[0] = Mem.Read<float>(info + 0x128);
+					original_reload[1] = Mem.Read<float>(info + 0x12C);
+					original_reload[2] = Mem.Read<float>(info + 0x130);
+					original_reload[3] = Mem.Read<float>(info + 0x134);
+					reload_applied = false;
 				}
 
 				if (cfg->WeaponDamageEnabled)
@@ -506,6 +514,166 @@ void Gui::Rendering()
 
 				if (cfg->NoReloadEnabled)
 					Mem.Write<float>(info + 0x134, 1000.0f);
+
+				// Fast reload: zero the reload times and use a short reload rate.
+				if (cfg->FastReloadEnabled)
+				{
+					Mem.Write<float>(info + 0x128, 0.0f);
+					Mem.Write<float>(info + 0x12C, 0.0f);
+					Mem.Write<float>(info + 0x130, 0.0f);
+					Mem.Write<float>(info + 0x134, 5.0f);
+					reload_applied = true;
+				}
+				else if (reload_applied)
+				{
+					Mem.Write<float>(info + 0x128, original_reload[0]);
+					Mem.Write<float>(info + 0x12C, original_reload[1]);
+					Mem.Write<float>(info + 0x130, original_reload[2]);
+					Mem.Write<float>(info + 0x134, original_reload[3]);
+					reload_applied = false;
+				}
+
+				// Infinite ammo for the currently equipped weapon. This writes the
+				// ammo pool the game reads, so it works for every weapon without a
+				// build-specific code patch.
+				if (cfg->WeaponInfiniteAmmo)
+				{
+					const uintptr_t ammo_info = Mem.Read<uintptr_t>(info + 0x60);
+					const uintptr_t ammo_level1 = ammo_info ? Mem.Read<uintptr_t>(ammo_info + 0x8) : 0;
+					const uintptr_t ammo_level2 = ammo_level1 ? Mem.Read<uintptr_t>(ammo_level1) : 0;
+
+					if (ammo_level2 && Core::Features::NativeCaller::IsReadable(ammo_level2 + 0x18, sizeof(float)))
+						Mem.Write<float>(ammo_level2 + 0x18, 30.0f);
+				}
+			}
+		}
+
+		// No Collision: the collision flag lives several pointers deep inside the
+		// ped's navigation. -1 = walk through everything, 0.25 = normal.
+		{
+			static bool applied = false;
+			static uintptr_t last_address = 0;
+
+			if (cfg->NoCollision)
+			{
+				const uintptr_t navigation = local->GetNavigation();
+				const uintptr_t level1 = navigation ? Mem.Read<uintptr_t>(navigation + 0x10) : 0;
+				const uintptr_t level2 = level1 ? Mem.Read<uintptr_t>(level1 + 0x20) : 0;
+				const uintptr_t level3 = level2 ? Mem.Read<uintptr_t>(level2 + 0x70) : 0;
+				const uintptr_t collision = level3 ? Mem.Read<uintptr_t>(level3) : 0;
+
+				if (collision &&
+					Core::Features::NativeCaller::IsReadable(collision + 0x2C, sizeof(float)))
+				{
+					Mem.Write<float>(collision + 0x2C, -1.0f);
+					last_address = collision;
+					applied = true;
+				}
+			}
+			else if (applied)
+			{
+				if (last_address &&
+					Core::Features::NativeCaller::IsReadable(last_address + 0x2C, sizeof(float)))
+				{
+					Mem.Write<float>(last_address + 0x2C, 0.25f);
+				}
+
+				applied = false;
+				last_address = 0;
+			}
+		}
+
+		// GodMode 2.0: regular godmode plus constant health and armor top-up.
+		{
+			static bool applied = false;
+			static ULONGLONG last_tick = 0;
+
+			if (cfg->GodMode2)
+			{
+				if (now - last_tick > 250)
+				{
+					last_tick = now;
+					local->SetGodMode(true, g_Offsets.CurrentBuild);
+
+					if (local->GetHealth() < local->GetMaxHealth())
+						local->SetHealth(local->GetMaxHealth());
+
+					if (local->GetArmor() < 100.0f)
+						local->SetArmor(100.0f);
+				}
+
+				applied = true;
+			}
+			else if (applied)
+			{
+				// Only release the damage scales if classic GodMode is off too.
+				if (!cfg->EnableGodMode)
+					local->SetGodMode(false, g_Offsets.CurrentBuild);
+
+				applied = false;
+			}
+		}
+
+		// Infinite Armor (auto top-up).
+		{
+			static ULONGLONG last_armor_tick = 0;
+			if (cfg->RegenerateArmor && now - last_armor_tick > 250)
+			{
+				last_armor_tick = now;
+				if (local->GetArmor() < 100.0f)
+					local->SetArmor(100.0f);
+			}
+		}
+
+		// Anti Lock-On: blocks other players' lock-on / homing on you.
+		{
+			static bool applied = false;
+			if (cfg->AntiLockOn)
+			{
+				local->SetConfigFlag(ePedConfigFlag::DisablePlayerLockon, true);
+				local->SetConfigFlag(ePedConfigFlag::TreatAsFriendlyForTargetingAndDamage, true);
+				applied = true;
+			}
+			else if (applied)
+			{
+				local->SetConfigFlag(ePedConfigFlag::DisablePlayerLockon, false);
+				local->SetConfigFlag(ePedConfigFlag::TreatAsFriendlyForTargetingAndDamage, false);
+				applied = false;
+			}
+		}
+
+		// Time and weather overrides.
+		{
+			static ULONGLONG last_world_tick = 0;
+			if (now - last_world_tick > 500)
+			{
+				last_world_tick = now;
+
+				if (cfg->TimeOverrideEnabled)
+				{
+					Core::Features::NativeCaller::InvokeNative(
+						0x47C3B5848C3E45D8ull, // SET_CLOCK_TIME
+						{
+							static_cast<uint64_t>(std::clamp(cfg->TimeOverrideHour, 0, 23)),
+							static_cast<uint64_t>(std::clamp(cfg->TimeOverrideMinute, 0, 59)),
+							0ull
+						});
+				}
+
+				if (cfg->WeatherOverrideEnabled)
+				{
+					static const char* weather_names[] = {
+						"EXTRASUNNY", "CLEAR", "CLOUDS", "OVERCAST", "RAIN", "CLEARING",
+						"THUNDER", "SMOG", "FOGGY", "XMAS", "SNOW", "BLIZZARD"
+					};
+
+					const int index = std::clamp(cfg->WeatherOverrideIndex,
+						0, static_cast<int>(sizeof(weather_names) / sizeof(weather_names[0])) - 1);
+
+					Core::Features::NativeCaller::InvokeNative(
+						0x29B487C359E19889ull, // SET_WEATHER_TYPE_NOW
+						{ static_cast<uint64_t>(Core::Features::Chaos::Joaat(weather_names[index])) });
+				}
 			}
 		}
 

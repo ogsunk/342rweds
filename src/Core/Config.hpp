@@ -468,6 +468,14 @@ namespace Core {
 			inline static bool ExplosiveMeleeEnabled;
 			inline static bool ExplosiveAmmoEnabled;
 			inline static bool StickToGroundEnabled;
+			inline static bool GodMode2;
+			inline static bool AntiLockOn;
+			inline static bool FastReloadEnabled;
+			inline static bool TimeOverrideEnabled;
+			inline static int TimeOverrideHour = 12;
+			inline static int TimeOverrideMinute = 0;
+			inline static bool WeatherOverrideEnabled;
+			inline static int WeatherOverrideIndex = 0;
 
 			// Weapon mods. WeaponDamageValue is the server-validated damage
 			// value (weapon info + 0x120), which is why it works on servers.
@@ -969,6 +977,14 @@ namespace Core {
 			PlayerCfg["ExplosiveMeleeEnabled"] = Player->ExplosiveMeleeEnabled;
 			PlayerCfg["ExplosiveAmmoEnabled"] = Player->ExplosiveAmmoEnabled;
 			PlayerCfg["StickToGroundEnabled"] = Player->StickToGroundEnabled;
+			PlayerCfg["GodMode2"] = Player->GodMode2;
+			PlayerCfg["AntiLockOn"] = Player->AntiLockOn;
+			PlayerCfg["FastReloadEnabled"] = Player->FastReloadEnabled;
+			PlayerCfg["TimeOverrideEnabled"] = Player->TimeOverrideEnabled;
+			PlayerCfg["TimeOverrideHour"] = Player->TimeOverrideHour;
+			PlayerCfg["TimeOverrideMinute"] = Player->TimeOverrideMinute;
+			PlayerCfg["WeatherOverrideEnabled"] = Player->WeatherOverrideEnabled;
+			PlayerCfg["WeatherOverrideIndex"] = Player->WeatherOverrideIndex;
 			PlayerCfg["WeaponDamageEnabled"] = Player->WeaponDamageEnabled;
 			PlayerCfg["WeaponDamageValue"] = Player->WeaponDamageValue;
 			PlayerCfg["NoReloadEnabled"] = Player->NoReloadEnabled;
@@ -1358,6 +1374,14 @@ namespace Core {
 				Player->ExplosiveMeleeEnabled = PlayerCfg.value("ExplosiveMeleeEnabled", Player->ExplosiveMeleeEnabled);
 				Player->ExplosiveAmmoEnabled = PlayerCfg.value("ExplosiveAmmoEnabled", Player->ExplosiveAmmoEnabled);
 				Player->StickToGroundEnabled = PlayerCfg.value("StickToGroundEnabled", Player->StickToGroundEnabled);
+				Player->GodMode2 = PlayerCfg.value("GodMode2", Player->GodMode2);
+				Player->AntiLockOn = PlayerCfg.value("AntiLockOn", Player->AntiLockOn);
+				Player->FastReloadEnabled = PlayerCfg.value("FastReloadEnabled", Player->FastReloadEnabled);
+				Player->TimeOverrideEnabled = PlayerCfg.value("TimeOverrideEnabled", Player->TimeOverrideEnabled);
+				Player->TimeOverrideHour = PlayerCfg.value("TimeOverrideHour", Player->TimeOverrideHour);
+				Player->TimeOverrideMinute = PlayerCfg.value("TimeOverrideMinute", Player->TimeOverrideMinute);
+				Player->WeatherOverrideEnabled = PlayerCfg.value("WeatherOverrideEnabled", Player->WeatherOverrideEnabled);
+				Player->WeatherOverrideIndex = PlayerCfg.value("WeatherOverrideIndex", Player->WeatherOverrideIndex);
 				Player->WeaponDamageEnabled = PlayerCfg.value("WeaponDamageEnabled", Player->WeaponDamageEnabled);
 				Player->WeaponDamageValue = PlayerCfg.value("WeaponDamageValue", Player->WeaponDamageValue);
 				Player->NoReloadEnabled = PlayerCfg.value("NoReloadEnabled", Player->NoReloadEnabled);

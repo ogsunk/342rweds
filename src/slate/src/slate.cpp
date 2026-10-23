@@ -7008,6 +7008,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     if (widgets->checkbox(I_SHIELD, "GodMode", &god_mode)) {
                         set_local_godmode(god_mode);
                     }
+                    widgets->checkbox(I_SHIELD, "GodMode 2.0", &g_Config.Player->GodMode2);
                     //widgets->checkbox(I_SHIELD, "Freecam", &g_Config.Player->FreeCam);
                     //if (g_Config.Player->FreeCam)
                     //    FreeCam();
@@ -7036,6 +7037,23 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->checkbox(I_SHIELD, "Infinite Armor", &g_Config.Player->RegenerateArmor);
                     widgets->checkbox(I_SHIELD, "No Fall Damage", &g_Config.Player->NoFallDamage);
                     widgets->checkbox(I_CAR, "No Collision", &g_Config.Player->NoCollision);
+                    widgets->checkbox(I_EYE__COG, "Anti Lock-On", &g_Config.Player->AntiLockOn);
+
+                    widgets->spacing(6 ds);
+                    widgets->separator();
+                    widgets->spacing(6 ds);
+
+                    widgets->checkbox(I_TARGET, "Time Override", &g_Config.Player->TimeOverrideEnabled);
+                    if (g_Config.Player->TimeOverrideEnabled) {
+                        widgets->sliderint(I_GRADIENTER, "Hour", &g_Config.Player->TimeOverrideHour, 0, 23, "%02d");
+                        widgets->sliderint(I_GRADIENTER, "Minute", &g_Config.Player->TimeOverrideMinute, 0, 59, "%02d");
+                    }
+                    widgets->checkbox(I_MOOD__SILENCE, "Weather Override", &g_Config.Player->WeatherOverrideEnabled);
+                    if (g_Config.Player->WeatherOverrideEnabled) {
+                        widgets->selector("Weather", &g_Config.Player->WeatherOverrideIndex,
+                            { "Extra Sunny", "Clear", "Clouds", "Overcast", "Rain", "Clearing",
+                              "Thunder", "Smog", "Foggy", "Xmas", "Snow", "Blizzard" });
+                    }
 
                     if (widgets->checkbox(I_GRADIENTER, "Player FOV Override", &g_Config.Player->PlayerFovOverride)) {
                         if (!g_Config.Player->PlayerFovOverride)
@@ -7385,6 +7403,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     }
                     if (widgets->checkbox(I_SWORD, "Infinite Clip", &g_Config.Player->WeaponInfiniteClip)) {
                         set_weapon_infinite_clip(g_Config.Player->WeaponInfiniteClip);
+                    }
+                    if (widgets->checkbox(I_CLOCK__HOUR__3, "Fast Reload", &g_Config.Player->FastReloadEnabled)) {
+                        NotifyManager::Send(
+                            g_Config.Player->FastReloadEnabled ? "Fast reload enabled" : "Fast reload disabled",
+                            220.0f);
                     }
                 }
             }
