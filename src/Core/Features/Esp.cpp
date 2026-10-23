@@ -703,40 +703,35 @@ void Core::Features::cEsp::DrawRadar()
 
 	const D3DXVECTOR3 origin = local->GetPos();
 
-	// GTA V world bounds for the map image (minimap.ymt: X -4140..4860, Y -5100..8400).
-	constexpr float MAP_MIN_X = -4140.0f;
-	constexpr float MAP_MAX_X = 4860.0f;
-	constexpr float MAP_MIN_Y = -5100.0f;
-	constexpr float MAP_MAX_Y = 8400.0f;
+	// Calibrated world bounds for map.png (full GTA V map stitched from tiles).
+	constexpr float MAP_MIN_X = -6138.0f;
+	constexpr float MAP_MAX_X = 6898.0f;
+	constexpr float MAP_MIN_Y = -3824.0f;
+	constexpr float MAP_MAX_Y = 8648.0f;
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
 	draw->PushClipRect(min, max, true);
 	draw->AddRectFilled(min, max, IM_COL32(10, 12, 16, 240), 8.0f);
 
-	// Accurate world-space grid (100 m cells, anchored to the world origin).
+	// Calibrated GTA V map, cropped around the local player (north-up).
+	if (g_Variables.MapTexture != nullptr)
 	{
-		const float cell = 100.0f * scale;
-		if (cell > 4.0f)
-		{
-			const float start_x = center.x - std::fmod(origin.x, 100.0f) * scale;
-			for (float gx = start_x; gx < max.x; gx += cell)
-			{
-				if (gx >= min.x)
-					draw->AddLine(ImVec2(gx, min.y), ImVec2(gx, max.y), IM_COL32(255, 255, 255, 16), 1.0f);
-			}
-			const float start_y = center.y + std::fmod(origin.y, 100.0f) * scale;
-			for (float gy = start_y; gy < max.y; gy += cell)
-			{
-				if (gy >= min.y)
-					draw->AddLine(ImVec2(min.x, gy), ImVec2(max.x, gy), IM_COL32(255, 255, 255, 16), 1.0f);
-			}
-		}
+		const float u = (origin.x - MAP_MIN_X) / MAP_W;
+		const float v = (MAP_MAX_Y - origin.y) / MAP_H;
+		const float du = crop_half / MAP_W;
+		const float dv = crop_half / MAP_H;
+
+		draw->AddImage(
+			reinterpret_cast<ImTextureID>(g_Variables.MapTexture),
+			min, max,
+			ImVec2(u - du, v - dv), ImVec2(u + du, v + dv),
+			IM_COL32(255, 255, 255, static_cast<int>(std::clamp(transparency + 0.25f, 0.0f, 1.0f) * 255.0f)));
 	}
 
 	// Range rings.
-	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 34), 64, 1.0f);
-	draw->AddCircle(center, std::min(width, height) * 0.45f, IM_COL32(255, 255, 255, 26), 64, 1.0f);
+	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 70), 64, 1.0f);
+	draw->AddCircle(center, std::min(width, height) * 0.45f, IM_COL32(255, 255, 255, 50), 64, 1.0f);
 	draw->PopClipRect();
 
 	draw->AddRect(min, max, IM_COL32(205, 50, 65, 255), 8.0f, 0, 2.0f);
