@@ -7409,6 +7409,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                             g_Config.Player->FastReloadEnabled ? "Fast reload enabled" : "Fast reload disabled",
                             220.0f);
                     }
+                    widgets->checkbox(I_SWORD, "Double Shot", &g_Config.Player->DoubleShot);
                 }
             }
             widgets->child.end();

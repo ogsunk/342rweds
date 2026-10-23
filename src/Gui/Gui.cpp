@@ -20,6 +20,7 @@
 #include <Core/Features/Exploits/Exploits.hpp>
 #include <Core/Features/NativeCaller.hpp>
 #include <Core/Features/Chaos.hpp>
+#include <Core/Features/World.hpp>
 #include <Core/Features/NVIDIA/nvidia.hpp>
 #include <Core/Features/Esp.hpp>
 #include <..\src\Security\Api\Auth\api\api.hh>
@@ -642,22 +643,21 @@ void Gui::Rendering()
 			}
 		}
 
-		// Time and weather overrides.
+		// Time and weather overrides. These are pure memory writes: the matching
+		// natives (SET_CLOCK_TIME / SET_WEATHER_TYPE_NOW) touch the script VM and
+		// crash when called from our external thread.
 		{
 			static ULONGLONG last_world_tick = 0;
-			if (now - last_world_tick > 500)
+
+			if ((cfg->TimeOverrideEnabled || cfg->WeatherOverrideEnabled) &&
+				now - last_world_tick > 500)
 			{
 				last_world_tick = now;
 
 				if (cfg->TimeOverrideEnabled)
 				{
-					Core::Features::NativeCaller::InvokeNative(
-						0x47C3B5848C3E45D8ull, // SET_CLOCK_TIME
-						{
-							static_cast<uint64_t>(std::clamp(cfg->TimeOverrideHour, 0, 23)),
-							static_cast<uint64_t>(std::clamp(cfg->TimeOverrideMinute, 0, 59)),
-							0ull
-						});
+					Core::Features::World::ApplyClock(
+						cfg->TimeOverrideHour, cfg->TimeOverrideMinute);
 				}
 
 				if (cfg->WeatherOverrideEnabled)
@@ -670,9 +670,77 @@ void Gui::Rendering()
 					const int index = std::clamp(cfg->WeatherOverrideIndex,
 						0, static_cast<int>(sizeof(weather_names) / sizeof(weather_names[0])) - 1);
 
-					Core::Features::NativeCaller::InvokeNative(
-						0x29B487C359E19889ull, // SET_WEATHER_TYPE_NOW
-						{ static_cast<uint64_t>(Core::Features::Chaos::Joaat(weather_names[index])) });
+					Core::Features::World::ApplyWeather(
+						Core::Features::Chaos::Joaat(weather_names[index]));
+				}
+			}
+		}
+
+		// Double Shot: while you are shooting, fire a second bullet along the
+		// gameplay camera ray using the currently equipped weapon.
+		if (cfg->DoubleShot && local_handle)
+		{
+			static ULONGLONG last_extra_shot = 0;
+
+			if (now - last_extra_shot > 85)
+			{
+				uint64_t shooting = 0;
+				if (Core::Features::NativeCaller::InvokeNative(
+						0x34616828CD07F1A1ull, { local_handle }, &shooting) && shooting)
+				{
+					uint64_t weapon_hash = 0;
+					if (Core::Features::NativeCaller::InvokeNative(
+							0x0A6DB4965674D243ull, { local_handle }, &weapon_hash) &&
+						weapon_hash && static_cast<uint32_t>(weapon_hash) != 0xA2719263u /* unarmed */)
+					{
+						D3DXVECTOR3 cam{}, rot{};
+						if (Core::Features::NativeCaller::InvokeNativeVector3(
+								0x14D6F5678D8F1B37ull, {}, cam) &&
+							Core::Features::NativeCaller::InvokeNativeVector3(
+								0x837765A25378F0BBull, {}, rot))
+						{
+							last_extra_shot = now;
+
+							const float pitch = rot.x * 3.14159265f / 180.0f;
+							const float yaw = rot.z * 3.14159265f / 180.0f;
+
+							const D3DXVECTOR3 direction{
+								-std::sin(yaw) * std::cos(pitch),
+								std::cos(yaw) * std::cos(pitch),
+								std::sin(pitch)
+							};
+
+							const D3DXVECTOR3 start{
+								cam.x + direction.x * 1.5f,
+								cam.y + direction.y * 1.5f,
+								cam.z + direction.z * 1.5f
+							};
+
+							const D3DXVECTOR3 end{
+								cam.x + direction.x * 300.0f,
+								cam.y + direction.y * 300.0f,
+								cam.z + direction.z * 300.0f
+							};
+
+							Core::Features::NativeCaller::InvokeNative(
+								0x867654CBC7606F2Cull, // SHOOT_SINGLE_BULLET_BETWEEN_COORDS
+								{
+									Core::Features::NativeCaller::FloatBits(start.x),
+									Core::Features::NativeCaller::FloatBits(start.y),
+									Core::Features::NativeCaller::FloatBits(start.z),
+									Core::Features::NativeCaller::FloatBits(end.x),
+									Core::Features::NativeCaller::FloatBits(end.y),
+									Core::Features::NativeCaller::FloatBits(end.z),
+									0ull,
+									weapon_hash,
+									static_cast<uint64_t>(local_handle),
+									0ull,
+									1ull,
+									0ull,
+									Core::Features::NativeCaller::FloatBits(1.0f)
+								});
+						}
+					}
 				}
 			}
 		}

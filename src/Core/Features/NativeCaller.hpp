@@ -624,4 +624,47 @@ namespace Core::Features::NativeCaller
 		VirtualFreeEx(Mem.ProcHandle, reinterpret_cast<LPVOID>(block), 0, MEM_RELEASE);
 		return true;
 	}
+
+	// Same as InvokeNative, but reads a 12-byte Vector3 from the return block.
+	inline bool InvokeNativeVector3(uint64_t hash, const std::vector<uint64_t>& args, D3DXVECTOR3& out)
+	{
+		if (!Initialize())
+			return false;
+
+		const uintptr_t handler = GetNativeHandler(hash);
+		if (!handler)
+			return false;
+
+		constexpr size_t context_size = 0x100;
+		constexpr size_t return_size = 0x10;
+		constexpr size_t args_size = 0x80;
+		const size_t total_size = context_size + return_size + args_size;
+
+		const uintptr_t block = Mem.AllocateExecutableMemory(total_size);
+		if (!block)
+			return false;
+
+		const uintptr_t return_ptr = block + context_size;
+		const uintptr_t args_ptr = return_ptr + return_size;
+
+		for (size_t i = 0; i < total_size; i += 8)
+			Mem.Write<uint64_t>(block + i, 0);
+
+		Mem.Write<uint64_t>(block + 0x00, return_ptr);
+		Mem.Write<uint32_t>(block + 0x08, static_cast<uint32_t>(args.size()));
+		Mem.Write<uint64_t>(block + 0x10, args_ptr);
+		Mem.Write<uint32_t>(block + 0x18, 0);
+
+		for (size_t i = 0; i < args.size() && i < 16; ++i)
+			Mem.Write<uint64_t>(args_ptr + i * 8, args[i]);
+
+		RemoteCall1(handler, block);
+
+		out.x = Mem.Read<float>(return_ptr + 0);
+		out.y = Mem.Read<float>(return_ptr + 4);
+		out.z = Mem.Read<float>(return_ptr + 8);
+
+		VirtualFreeEx(Mem.ProcHandle, reinterpret_cast<LPVOID>(block), 0, MEM_RELEASE);
+		return true;
+	}
 }
