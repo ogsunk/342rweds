@@ -703,11 +703,12 @@ void Core::Features::cEsp::DrawRadar()
 
 	const D3DXVECTOR3 origin = local->GetPos();
 
-	// Calibrated world bounds for map.png (full GTA V map stitched from tiles).
-	constexpr float MAP_MIN_X = -6138.0f;
-	constexpr float MAP_MAX_X = 6898.0f;
-	constexpr float MAP_MIN_Y = -3824.0f;
-	constexpr float MAP_MAX_Y = 8648.0f;
+	// Calibrated world bounds for map.png (square map covering the GTA V world).
+	// Y uses the minimap.ymt extents; X is the same square span centred on the map.
+	constexpr float MAP_MIN_X = -6390.0f;
+	constexpr float MAP_MAX_X = 7110.0f;
+	constexpr float MAP_MIN_Y = -5100.0f;
+	constexpr float MAP_MAX_Y = 8400.0f;
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
