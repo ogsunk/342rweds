@@ -16,6 +16,8 @@ namespace Core::Features::NativeCaller
 	inline std::atomic<bool> g_available{ false };
 	inline std::atomic<int> g_init_attempts{ 0 };
 	inline std::atomic<DWORD> g_resolved_pid{ 0 };
+	inline std::unordered_map<uint64_t, uintptr_t> g_handler_cache;
+	inline std::mutex g_handler_cache_mutex;
 	inline std::atomic<int> g_stage{ 0 };
 	inline std::atomic<int> g_cached_build{ 0 };
 	inline bool g_handler_two_args = false;
@@ -561,10 +563,25 @@ namespace Core::Features::NativeCaller
 		if (!Initialize() || !g_get_native_handler)
 			return 0;
 
-		if (g_handler_two_args)
-			return static_cast<uintptr_t>(RemoteCall2(g_get_native_handler, hash, hash));
+		{
+			std::lock_guard<std::mutex> lock(g_handler_cache_mutex);
+			const auto it = g_handler_cache.find(hash);
+			if (it != g_handler_cache.end())
+				return it->second;
+		}
 
-		return static_cast<uintptr_t>(RemoteCall1(g_get_native_handler, hash));
+		uintptr_t handler = 0;
+		if (g_handler_two_args)
+			handler = static_cast<uintptr_t>(RemoteCall2(g_get_native_handler, hash, hash));
+		else
+			handler = static_cast<uintptr_t>(RemoteCall1(g_get_native_handler, hash));
+
+		if (handler)
+		{
+			std::lock_guard<std::mutex> lock(g_handler_cache_mutex);
+			g_handler_cache[hash] = handler;
+		}
+		return handler;
 	}
 
 	inline bool InvokeNative(uint64_t hash, const std::vector<uint64_t>& args, uint64_t* result = nullptr)

@@ -670,26 +670,32 @@ namespace
 	float get_entity_heading(uintptr_t ped)
 	{
 		static uintptr_t cached_ped = 0;
+		static uint32_t cached_handle = 0;
 		static float cached_heading = 0.0f;
 		static ULONGLONG cached_time = 0;
 
 		if (!ped || !Core::Features::NativeCaller::IsAvailable())
 			return cached_heading;
 
-		const ULONGLONG now = GetTickCount64();
-		if (ped == cached_ped && now - cached_time < 120)
+		if (ped != cached_ped)
+		{
+			cached_ped = ped;
+			cached_handle = Core::Features::NativeCaller::PointerToHandle(ped);
+			cached_time = 0;
+		}
+
+		if (!cached_handle)
 			return cached_heading;
 
-		const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(ped);
-		if (!handle)
+		const ULONGLONG now = GetTickCount64();
+		if (now - cached_time < 200)
 			return cached_heading;
 
 		uint64_t result = 0;
-		if (Core::Features::NativeCaller::InvokeNative(0xE83D4F9BA2A38914ull, { handle }, &result))
+		if (Core::Features::NativeCaller::InvokeNative(0xE83D4F9BA2A38914ull, { cached_handle }, &result))
 		{
 			const uint32_t bits = static_cast<uint32_t>(result);
 			std::memcpy(&cached_heading, &bits, sizeof(float));
-			cached_ped = ped;
 			cached_time = now;
 		}
 		return cached_heading;
@@ -738,8 +744,8 @@ void Core::Features::cEsp::DrawRadar()
 	// Calibrated world bounds for map.png (square map covering the GTA V world).
 	constexpr float MAP_MIN_X = -6390.0f;
 	constexpr float MAP_MAX_X = 7110.0f;
-	constexpr float MAP_MIN_Y = -5100.0f;
-	constexpr float MAP_MAX_Y = 8400.0f;
+	constexpr float MAP_MIN_Y = -3824.0f;
+	constexpr float MAP_MAX_Y = 8648.0f;
 	constexpr float MAP_W = MAP_MAX_X - MAP_MIN_X;
 	constexpr float MAP_H = MAP_MAX_Y - MAP_MIN_Y;
 
@@ -747,8 +753,19 @@ void Core::Features::cEsp::DrawRadar()
 	const float effective_crop = crop_half / map_scale;
 	const float scale = (std::min(width, height) * 0.5f) / effective_crop;
 
-	const float heading_deg = get_entity_heading(reinterpret_cast<uintptr_t>(local));
-	const float ang = cfg->RadarRotate ? (-heading_deg * 3.14159265358979f / 180.0f) : 0.0f;
+	// Smooth the heading so rotation is fluid instead of stepping every sample.
+	static float smooth_heading = 0.0f;
+	{
+		const float target = get_entity_heading(reinterpret_cast<uintptr_t>(local));
+		float diff = target - smooth_heading;
+		while (diff > 180.0f) diff -= 360.0f;
+		while (diff < -180.0f) diff += 360.0f;
+		smooth_heading += diff * std::clamp(ImGui::GetIO().DeltaTime * 12.0f, 0.0f, 1.0f);
+		if (smooth_heading < 0.0f) smooth_heading += 360.0f;
+		if (smooth_heading >= 360.0f) smooth_heading -= 360.0f;
+	}
+
+	const float ang = cfg->RadarRotate ? (-smooth_heading * 3.14159265358979f / 180.0f) : 0.0f;
 	const float ca = std::cos(ang);
 	const float sa = std::sin(ang);
 	auto rp = [&](float x, float y) {
@@ -776,12 +793,22 @@ void Core::Features::cEsp::DrawRadar()
 
 		if (cfg->RadarRotate)
 		{
+			// Overdraw by 1.5x so the rotated quad fully covers the panel corners
+			// (scale quad and UVs equally, so the visible map scale is unchanged).
+			constexpr float COVER = 1.5f;
+			const float hw = width * 0.5f * COVER;
+			const float hh = height * 0.5f * COVER;
+			const float duc = du * COVER;
+			const float dvc = dv * COVER;
+
 			draw->AddImageQuad(tex,
-				rp(-width * 0.5f, -height * 0.5f),
-				rp(width * 0.5f, -height * 0.5f),
-				rp(width * 0.5f, height * 0.5f),
-				rp(-width * 0.5f, height * 0.5f),
-				uv1, uv2, uv3, uv4, col);
+				rp(-hw, -hh),
+				rp(hw, -hh),
+				rp(hw, hh),
+				rp(-hw, hh),
+				ImVec2(u - duc, v - dvc), ImVec2(u + duc, v - dvc),
+				ImVec2(u + duc, v + dvc), ImVec2(u - duc, v + dvc),
+				col);
 		}
 		else
 		{
@@ -803,6 +830,14 @@ void Core::Features::cEsp::DrawRadar()
 	// Header + cardinal markers (rotate with the map).
 	draw->AddRectFilled(min, ImVec2(max.x, min.y + 20.0f), IM_COL32(8, 8, 10, 235), 8.0f, ImDrawFlags_RoundCornersTop);
 	draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(min.x + 8.0f, min.y + 4.0f), IM_COL32(205, 50, 65, 255), "RADAR");
+	{
+		char coords[64]{};
+		std::snprintf(coords, sizeof(coords), "%.0f, %.0f", origin.x, origin.y);
+		const ImVec2 coords_size = ImGui::CalcTextSize(coords);
+		draw->AddText(ImGui::GetFont(), 10.0f,
+			ImVec2(max.x - coords_size.x - 8.0f, min.y + 5.0f),
+			IM_COL32(180, 180, 180, 210), coords);
+	}
 	{
 		const ImVec2 n = rp(0.0f, -(height * 0.5f - 12.0f));
 		const ImVec2 s = rp(0.0f, height * 0.5f - 12.0f);
