@@ -343,6 +343,8 @@ namespace Core {
 			inline static float TextThickness = 0.0f;
 			inline static ImColor DistanceCol{ 230, 230, 230, 255 };
 			inline static ImColor UserNamesCol{ 230, 230, 230, 255 };
+			inline static bool HighlightAdmins = true;
+			inline static ImColor AdminCol{ 255, 64, 64, 255 };
 			inline static ImColor WeaponNameCol{ 230, 230, 230, 255 };
 			inline static ImColor SkeletonCol{ 255, 255, 255, 200 };
 			inline static ImColor SkeletonOutlineCol{ 0, 0, 0, 200 };
@@ -466,6 +468,11 @@ namespace Core {
 			inline static bool ExplosiveMeleeEnabled;
 			inline static bool ExplosiveAmmoEnabled;
 			inline static bool StickToGroundEnabled;
+
+			// Weapon mods. WeaponDamageValue is the server-validated damage
+			// value (weapon info + 0x120), which is why it works on servers.
+			inline static bool WeaponDamageEnabled;
+			inline static int WeaponDamageValue = 100;
 
 			// Chaos tab
 			inline static bool ChaosUnusableVehicles;
@@ -856,6 +863,8 @@ namespace Core {
 			ESPCfg["TextThickness"] = ESP->TextThickness;
 			ESPCfg["DistanceCol"] = ImColToJson(ESP->DistanceCol);
 			ESPCfg["UserNamesCol"] = ImColToJson(ESP->UserNamesCol);
+			ESPCfg["HighlightAdmins"] = ESP->HighlightAdmins;
+			ESPCfg["AdminCol"] = ImColToJson(ESP->AdminCol);
 			ESPCfg["WeaponNameCol"] = ImColToJson(ESP->WeaponNameCol);
 			ESPCfg["SkeletonCol"] = ImColToJson(ESP->SkeletonCol);
 			ESPCfg["SkeletonOutlineCol"] = ImColToJson(ESP->SkeletonOutlineCol);
@@ -960,6 +969,9 @@ namespace Core {
 			PlayerCfg["ExplosiveMeleeEnabled"] = Player->ExplosiveMeleeEnabled;
 			PlayerCfg["ExplosiveAmmoEnabled"] = Player->ExplosiveAmmoEnabled;
 			PlayerCfg["StickToGroundEnabled"] = Player->StickToGroundEnabled;
+			PlayerCfg["WeaponDamageEnabled"] = Player->WeaponDamageEnabled;
+			PlayerCfg["WeaponDamageValue"] = Player->WeaponDamageValue;
+			PlayerCfg["NoReloadEnabled"] = Player->NoReloadEnabled;
 			PlayerCfg["ChaosUnusableVehicles"] = Player->ChaosUnusableVehicles;
 			PlayerCfg["ChaosSpamCount"] = Player->ChaosSpamCount;
 			PlayerCfg["ChaosRadius"] = Player->ChaosRadius;
@@ -1238,6 +1250,8 @@ namespace Core {
 				ESP->TextThickness = ESPCfg.value("TextThickness", ESP->TextThickness);
 				ESP->DistanceCol = JsonToImCol(ESPCfg.value("DistanceCol", ImColToJson(ESP->DistanceCol)));
 				ESP->UserNamesCol = JsonToImCol(ESPCfg.value("UserNamesCol", ImColToJson(ESP->UserNamesCol)));
+				ESP->HighlightAdmins = ESPCfg.value("HighlightAdmins", ESP->HighlightAdmins);
+				ESP->AdminCol = JsonToImCol(ESPCfg.value("AdminCol", ImColToJson(ESP->AdminCol)));
 				ESP->WeaponNameCol = JsonToImCol(ESPCfg.value("WeaponNameCol", ImColToJson(ESP->WeaponNameCol)));
 				ESP->SkeletonCol = JsonToImCol(ESPCfg.value("SkeletonCol", ImColToJson(ESP->SkeletonCol)));
 				ESP->SkeletonOutlineCol = JsonToImCol(ESPCfg.value("SkeletonOutlineCol", ImColToJson(ESP->SkeletonOutlineCol)));
@@ -1344,6 +1358,9 @@ namespace Core {
 				Player->ExplosiveMeleeEnabled = PlayerCfg.value("ExplosiveMeleeEnabled", Player->ExplosiveMeleeEnabled);
 				Player->ExplosiveAmmoEnabled = PlayerCfg.value("ExplosiveAmmoEnabled", Player->ExplosiveAmmoEnabled);
 				Player->StickToGroundEnabled = PlayerCfg.value("StickToGroundEnabled", Player->StickToGroundEnabled);
+				Player->WeaponDamageEnabled = PlayerCfg.value("WeaponDamageEnabled", Player->WeaponDamageEnabled);
+				Player->WeaponDamageValue = PlayerCfg.value("WeaponDamageValue", Player->WeaponDamageValue);
+				Player->NoReloadEnabled = PlayerCfg.value("NoReloadEnabled", Player->NoReloadEnabled);
 				Player->ChaosUnusableVehicles = PlayerCfg.value("ChaosUnusableVehicles", Player->ChaosUnusableVehicles);
 				Player->ChaosSpamCount = PlayerCfg.value("ChaosSpamCount", Player->ChaosSpamCount);
 				Player->ChaosRadius = PlayerCfg.value("ChaosRadius", Player->ChaosRadius);

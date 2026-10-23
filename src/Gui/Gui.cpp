@@ -471,6 +471,44 @@ void Gui::Rendering()
 			}
 		}
 
+		// Weapon mods. weaponInfo+0x120 is the damage value the server validates
+		// against, which is why boosting it actually works online. The old code
+		// wrote 1 here every frame, which nerfed every gun to 1 damage.
+		{
+			static uintptr_t last_weapon_info = 0;
+			static uint32_t original_damage = 0;
+			static bool damage_applied = false;
+
+			auto* weapon_manager = local->GetWeaponManager();
+			auto* weapon_info = weapon_manager ? weapon_manager->GetWeaponInfo() : nullptr;
+			const uintptr_t info = reinterpret_cast<uintptr_t>(weapon_info);
+
+			if (info && Core::Features::NativeCaller::IsReadable(info, 0x150))
+			{
+				if (info != last_weapon_info)
+				{
+					last_weapon_info = info;
+					original_damage = Mem.Read<uint32_t>(info + 0x120);
+					damage_applied = false;
+				}
+
+				if (cfg->WeaponDamageEnabled)
+				{
+					Mem.Write<uint32_t>(info + 0x120,
+						static_cast<uint32_t>(std::clamp(cfg->WeaponDamageValue, 1, 100000)));
+					damage_applied = true;
+				}
+				else if (damage_applied)
+				{
+					Mem.Write<uint32_t>(info + 0x120, original_damage);
+					damage_applied = false;
+				}
+
+				if (cfg->NoReloadEnabled)
+					Mem.Write<float>(info + 0x134, 1000.0f);
+			}
+		}
+
 		// Invisible (local entity visibility).
 		{
 			static bool last_invisible = false;

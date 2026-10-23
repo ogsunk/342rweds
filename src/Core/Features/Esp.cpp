@@ -667,6 +667,27 @@ namespace
 {
 	// Cached GET_ENTITY_HEADING (degrees, 0 = north). Throttled to avoid
 	// creating a remote thread every frame.
+	bool is_admin_name(const std::string& name)
+	{
+		static const char* keywords[] = {
+			"admin", "staff", "moder", "owner", "founder", "helper",
+			"suporte", "support", "developer", "[dev]", "[mod]", "anticheat"
+		};
+
+		std::string lower;
+		lower.reserve(name.size());
+		for (const char c : name)
+			lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+
+		for (const char* keyword : keywords)
+		{
+			if (lower.find(keyword) != std::string::npos)
+				return true;
+		}
+
+		return false;
+	}
+
 	float get_entity_heading(uintptr_t ped)
 	{
 		static uintptr_t cached_ped = 0;
@@ -1696,6 +1717,9 @@ void Core::Features::cEsp::Draw()
 		{
 
 			std::string PlayerName = Utils::ValidateTextForRendering(Entity.NetworkInfo.UserName);
+			const bool is_admin = Cfg->HighlightAdmins && is_admin_name(PlayerName);
+			if (is_admin)
+				PlayerName = "[ADMIN] " + PlayerName;
 
 			ImVec2 TextSize = nameFont->CalcTextSizeA(nameFontSize, FLT_MAX, 0.0f, PlayerName.c_str());
 			ImVec2 TextPos = ImVec2(BoxCenter.x - (TextSize.x / 2), FirstTextBoxTop);
@@ -1719,8 +1743,8 @@ void Core::Features::cEsp::Draw()
 			DrawList->AddText( g_Variables.m_DrawFont, g_Variables.m_DrawFont->FontSize, ImVec2( TextPos.x + 1, TextPos.y - 1 ), ImColor( 0, 0, 0, 100 ), PlayerName.c_str( ) );
 			DrawList->AddText( g_Variables.m_DrawFont, g_Variables.m_DrawFont->FontSize, ImVec2( TextPos.x - 1, TextPos.y - 1 ), ImColor( 0, 0, 0, 100 ), PlayerName.c_str( ) );*/
 
-			DrawList->AddText(nameFont, nameFontSize, ImVec2(TextPos.x + 1, TextPos.y + 1), ImColor(0.f, 0.f, 0.f, Cfg->UserNamesCol.Value.w), PlayerName.c_str());
-			DrawList->AddText(nameFont, nameFontSize, TextPos, Cfg->UserNamesCol, PlayerName.c_str());
+			DrawList->AddText(nameFont, nameFontSize, ImVec2(TextPos.x + 1, TextPos.y + 1), ImColor(0.f, 0.f, 0.f, (is_admin ? Cfg->AdminCol : Cfg->UserNamesCol).Value.w), PlayerName.c_str());
+			DrawList->AddText(nameFont, nameFontSize, TextPos, is_admin ? Cfg->AdminCol : Cfg->UserNamesCol, PlayerName.c_str());
 		}
 
 		const auto DrawHealthBarV = [&DrawList](ImVec2 pos, ImVec2 dim, ImColor col, int background) {

@@ -6404,6 +6404,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                 widgets->checkbox(I_PAW, "Ignore Animals", &g_Config.ESP->IgnoreAnimals);
                 widgets->checkbox(I_EYE, "Highlight Visible", &g_Config.ESP->HighlightVisible);
                 widgets->checkbox(I_EYE, "Friend Marker", &g_Config.ESP->FriendsMarker);
+                widgets->checkbox(I_EYE, "Highlight Admins", &g_Config.ESP->HighlightAdmins);
                 if (g_Config.ESP->FriendsMarker) {
                     widgets->binder(I_COMMAND, "Friend Marker Key", &g_Config.ESP->FriendsMarkerBind);
                 }
@@ -7074,22 +7075,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     }
                     widgets->sliderfloat(I_CLOCK__HOUR__3, "FakeLag Delay", &g_Config.Player->FakeLagDelay, 40.0f, 2000.0f, "%.0f ms");
 
-                    if (auto* weapon_manager = local_player->GetWeaponManager()) {
-                        if (auto* weapon_info = weapon_manager->GetWeaponInfo()) {
-
-                            const uintptr_t weapon_info_address =
-                                reinterpret_cast<uintptr_t>(weapon_info);
-
-                            uint32_t damage = 1;
-
-                            Mem.Write<uint32_t>(
-                                weapon_info_address + 0x120,
-                                damage
-                            );
-                        }
+                    widgets->checkbox(I_TARGET, "Weapon Damage", &g_Config.Player->WeaponDamageEnabled);
+                    if (g_Config.Player->WeaponDamageEnabled) {
+                        widgets->sliderint(I_GRADIENTER, "Damage Value", &g_Config.Player->WeaponDamageValue, 1, 5000, "%d");
                     }
 
-                
                     bool no_ragdoll = g_Config.Player->NoRagDollEnabled;
                     if (widgets->checkbox(I_MOOD__SILENCE, "No RagDoll", &no_ragdoll)) {
                         set_local_no_ragdoll(no_ragdoll);
