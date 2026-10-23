@@ -400,6 +400,7 @@ namespace Gui
 
 		if (g_Variables.MapTexture == nullptr)
 		{
+			std::ofstream debug("C:\\Users\\tyler\\Desktop\\Wizard External\\map_debug.txt");
 			const char* map_paths[] = {
 				"map.png",
 				"C:\\Users\\tyler\\Desktop\\Wizard External\\build\\VisualPort\\map.png"
@@ -409,12 +410,18 @@ namespace Gui
 			{
 				std::ifstream file(path, std::ios::binary);
 				if (!file.is_open())
+				{
+					debug << path << " : open failed\n";
 					continue;
+				}
 
 				std::vector<char> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+				debug << path << " : " << data.size() << " bytes\n";
+
 				if (!data.empty())
 				{
-					D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, data.data(), data.size(), &Info, Pump, &g_Variables.MapTexture, 0);
+					HRESULT hr = D3DX11CreateShaderResourceViewFromMemory(g_pd3dDevice, data.data(), data.size(), nullptr, nullptr, &g_Variables.MapTexture, nullptr);
+					debug << "  hr=" << static_cast<long>(hr) << " tex=" << (g_Variables.MapTexture ? 1 : 0) << "\n";
 				}
 				if (g_Variables.MapTexture != nullptr)
 					break;

@@ -728,6 +728,10 @@ void Core::Features::cEsp::DrawRadar()
 			ImVec2(u - du, v - dv), ImVec2(u + du, v + dv),
 			IM_COL32(255, 255, 255, static_cast<int>(std::clamp(transparency + 0.25f, 0.0f, 1.0f) * 255.0f)));
 	}
+	else
+	{
+		draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(min.x + 8.0f, min.y + 26.0f), IM_COL32(255, 150, 60, 255), "MAP MISSING");
+	}
 
 	// Range rings.
 	draw->AddCircle(center, std::min(width, height) * 0.25f, IM_COL32(255, 255, 255, 70), 64, 1.0f);
