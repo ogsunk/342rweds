@@ -60,6 +60,19 @@ namespace Core::Features::World
 
 			if (!g_weather_address)
 			{
+				const uintptr_t simpler = Mem.FindSignatureStr(
+					"83 3D ?? ?? ?? ?? 00 74 ?? E8", Mem.ModBase, Mem.ModBaseSize);
+
+				if (simpler)
+				{
+					const uintptr_t target = ResolveRip(simpler, 2, 6);
+					if (NativeCaller::IsReadable(target, sizeof(uint32_t)))
+						g_weather_address = target;
+				}
+			}
+
+			if (!g_weather_address)
+			{
 				const uintptr_t fallback = Mem.FindSignatureStr(
 					"8B 05 ?? ?? ?? ?? 89 05", Mem.ModBase, Mem.ModBaseSize);
 

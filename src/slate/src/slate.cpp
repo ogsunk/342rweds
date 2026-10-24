@@ -6022,7 +6022,7 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
         { I_EYE__COG, "Visuals", { { I_USER, "Player ESP" }, { I_CAR, "Vehicle ESP" }, { I_CURRENT__LOCATION, "Radar" } } },
         { I_USER__COG, "Player List", { { I_USER, "Player List" }, { I_HEART, "Friend List" } } },
         { I_CAR, "Vehicle List", {  } },
-        { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" }, { I_WAVE__SAW__TOOL, "Chaos" } } },
+        { I_DOTS, "Misc", { { I_USER__COG, "Self" }, { I_CAR, "Vehicle" }, { I_SWORD, "Weapon" }, { I_WAVE__SAW__TOOL, "Chaos" }, { I_CURRENT__LOCATION, "World" } } },
         { I_FOLDER__COG, "Configs", {  } },
         { I_WAVE__SAW__TOOL, "Settings", { { I_SETTINGS, "General" }, { I_TARGET, "Crosshair" } } },
     };
@@ -7039,22 +7039,6 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     widgets->checkbox(I_CAR, "No Collision", &g_Config.Player->NoCollision);
                     widgets->checkbox(I_EYE__COG, "Anti Lock-On", &g_Config.Player->AntiLockOn);
 
-                    widgets->spacing(6 ds);
-                    widgets->separator();
-                    widgets->spacing(6 ds);
-
-                    widgets->checkbox(I_TARGET, "Time Override", &g_Config.Player->TimeOverrideEnabled);
-                    if (g_Config.Player->TimeOverrideEnabled) {
-                        widgets->sliderint(I_GRADIENTER, "Hour", &g_Config.Player->TimeOverrideHour, 0, 23, "%02d");
-                        widgets->sliderint(I_GRADIENTER, "Minute", &g_Config.Player->TimeOverrideMinute, 0, 59, "%02d");
-                    }
-                    widgets->checkbox(I_MOOD__SILENCE, "Weather Override", &g_Config.Player->WeatherOverrideEnabled);
-                    if (g_Config.Player->WeatherOverrideEnabled) {
-                        widgets->selector("Weather", &g_Config.Player->WeatherOverrideIndex,
-                            { "Extra Sunny", "Clear", "Clouds", "Overcast", "Rain", "Clearing",
-                              "Thunder", "Smog", "Foggy", "Xmas", "Snow", "Blizzard" });
-                    }
-
                     if (widgets->checkbox(I_GRADIENTER, "Player FOV Override", &g_Config.Player->PlayerFovOverride)) {
                         if (!g_Config.Player->PlayerFovOverride)
                             local_player->fSetFov(100.0f);
@@ -7583,6 +7567,67 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
             widgets->child.end();
         }
         EndGroup();
+        });
+
+    widgets->nav.addpage(4, [&] {
+        const float world_width = GetContentRegionAvail().x;
+
+        widgets->child.begin(I_CLOCK__HOUR__3, "Time Override", 1, { world_width, 196 ds });
+        {
+            if (widgets->checkbox(I_CLOCK__HOUR__3, "Enable Time Override", &g_Config.Player->TimeOverrideEnabled)) {
+                NotifyManager::Send(
+                    g_Config.Player->TimeOverrideEnabled ? "Time override enabled" : "Time override disabled",
+                    220.0f);
+            }
+
+            widgets->sliderint(I_GRADIENTER, "Hour", &g_Config.Player->TimeOverrideHour, 0, 23, "%02d");
+            widgets->sliderint(I_GRADIENTER, "Minute", &g_Config.Player->TimeOverrideMinute, 0, 59, "%02d");
+
+            widgets->spacing(6 ds);
+
+            const float preset_gap = 6 ds;
+            const float preset_width = (GetContentRegionAvail().x - preset_gap * 3.0f) * 0.25f;
+
+            if (widgets->button("Morning", { preset_width, 26 ds })) {
+                g_Config.Player->TimeOverrideHour = 6;
+                g_Config.Player->TimeOverrideMinute = 0;
+            }
+            SameLine(0, preset_gap);
+            if (widgets->button("Noon", { preset_width, 26 ds })) {
+                g_Config.Player->TimeOverrideHour = 12;
+                g_Config.Player->TimeOverrideMinute = 0;
+            }
+            SameLine(0, preset_gap);
+            if (widgets->button("Evening", { preset_width, 26 ds })) {
+                g_Config.Player->TimeOverrideHour = 19;
+                g_Config.Player->TimeOverrideMinute = 30;
+            }
+            SameLine(0, preset_gap);
+            if (widgets->button("Night", { preset_width, 26 ds })) {
+                g_Config.Player->TimeOverrideHour = 0;
+                g_Config.Player->TimeOverrideMinute = 0;
+            }
+        }
+        widgets->child.end();
+
+        widgets->spacing(8 ds);
+
+        widgets->child.begin(I_MOOD__SILENCE, "Weather Override", 2, { world_width, 168 ds });
+        {
+            if (widgets->checkbox(I_MOOD__SILENCE, "Enable Weather Override", &g_Config.Player->WeatherOverrideEnabled)) {
+                NotifyManager::Send(
+                    g_Config.Player->WeatherOverrideEnabled ? "Weather override enabled" : "Weather override disabled",
+                    220.0f);
+            }
+
+            widgets->selector("Weather", &g_Config.Player->WeatherOverrideIndex,
+                { "Extra Sunny", "Clear", "Clouds", "Overcast", "Rain", "Clearing",
+                  "Thunder", "Smog", "Foggy", "Xmas", "Snow", "Blizzard" });
+
+            widgets->spacing(4 ds);
+            TextDisabled("Servers that force their own weather will override this.");
+        }
+        widgets->child.end();
         });
 
     widgets->nav.addpage(5, [&] {
