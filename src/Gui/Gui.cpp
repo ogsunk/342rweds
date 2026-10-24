@@ -481,6 +481,8 @@ void Gui::Rendering()
 			static bool damage_applied = false;
 			static float original_reload[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 			static bool reload_applied = false;
+			static uint32_t original_double_shot = 0;
+			static bool double_shot_applied = false;
 
 			auto* weapon_manager = local->GetWeaponManager();
 			auto* weapon_info = weapon_manager ? weapon_manager->GetWeaponInfo() : nullptr;
@@ -499,6 +501,9 @@ void Gui::Rendering()
 					original_reload[2] = Mem.Read<float>(info + 0x130);
 					original_reload[3] = Mem.Read<float>(info + 0x134);
 					reload_applied = false;
+
+					original_double_shot = Mem.Read<uint32_t>(info + 0x13C);
+					double_shot_applied = false;
 				}
 
 				if (cfg->WeaponDamageEnabled)
@@ -545,6 +550,20 @@ void Gui::Rendering()
 
 					if (ammo_level2 && Core::Features::NativeCaller::IsReadable(ammo_level2 + 0x18, sizeof(float)))
 						Mem.Write<float>(ammo_level2 + 0x18, 30.0f);
+				}
+
+				// Double shoot: weapon info + 0x13C = 0 makes the weapon fire two
+				// bullets per shot. This is the native flag the game's own weapon
+				// code reads, so it works on servers without any extra projectile.
+				if (cfg->DoubleShot)
+				{
+					Mem.Write<uint32_t>(info + 0x13C, 0);
+					double_shot_applied = true;
+				}
+				else if (double_shot_applied)
+				{
+					Mem.Write<uint32_t>(info + 0x13C, original_double_shot);
+					double_shot_applied = false;
 				}
 			}
 		}
@@ -615,6 +634,17 @@ void Gui::Rendering()
 			}
 		}
 
+		// No Fall Damage: cap the fall speed so the game never applies fall damage.
+		if (cfg->NoFallDamage)
+		{
+			D3DXVECTOR3 velocity = local->GetVelocity();
+			if (velocity.z < -9.0f)
+			{
+				velocity.z = -9.0f;
+				Mem.Write<D3DXVECTOR3>(reinterpret_cast<uintptr_t>(local) + 0x320, velocity);
+			}
+		}
+
 		// Infinite Armor (auto top-up).
 		{
 			static ULONGLONG last_armor_tick = 0;
@@ -653,39 +683,10 @@ void Gui::Rendering()
 				cfg->TimeOverrideHour, cfg->TimeOverrideMinute);
 		}
 
-		if (cfg->WeatherOverrideEnabled)
-		{
-			static const char* weather_names[] = {
-				"EXTRASUNNY", "CLEAR", "CLOUDS", "OVERCAST", "RAIN", "CLEARING",
-				"THUNDER", "SMOG", "FOGGY", "XMAS", "SNOW", "BLIZZARD"
-			};
-
-			const int index = std::clamp(cfg->WeatherOverrideIndex,
-				0, static_cast<int>(sizeof(weather_names) / sizeof(weather_names[0])) - 1);
-
-			Core::Features::World::ApplyWeather(
-				Core::Features::Chaos::Joaat(weather_names[index]));
-		}
-
-		// One-shot feedback so it is obvious whether the world overrides resolved
+		// One-shot feedback so it is obvious whether the time override resolved
 		// on this game build.
 		{
-			static bool weather_reported = false;
 			static bool time_reported = false;
-
-			if (!cfg->WeatherOverrideEnabled)
-			{
-				weather_reported = false;
-			}
-			else if (!weather_reported && Core::Features::World::g_scan_done.load())
-			{
-				weather_reported = true;
-				NotifyManager::Send(
-					Core::Features::World::g_weather_address
-						? "Weather override active"
-						: "Weather override unavailable on this build",
-					260.0f);
-			}
 
 			if (!cfg->TimeOverrideEnabled)
 			{
@@ -699,110 +700,6 @@ void Gui::Rendering()
 						? "Time override active"
 						: "Time override unavailable on this build",
 					260.0f);
-			}
-		}
-
-		// Double Shot: while you are firing a firearm, fire a second bullet along
-		// the gameplay camera ray using the equipped weapon.
-		if (cfg->DoubleShot && local_handle)
-		{
-			static ULONGLONG last_extra_shot = 0;
-
-			if (now - last_extra_shot > 70)
-			{
-				uint64_t weapon_hash = 0;
-				uint64_t ammo = 0;
-
-				const bool has_weapon =
-					Core::Features::NativeCaller::InvokeNative(
-						0x0A6DB4965674D243ull, { local_handle }, &weapon_hash) && // GET_SELECTED_PED_WEAPON
-					weapon_hash && static_cast<uint32_t>(weapon_hash) != 0xA2719263u; // unarmed
-
-				// Ammo > 0 means it is a firearm, so melee/unarmed never fire a
-				// stray bullet.
-				const bool is_firearm = has_weapon &&
-					Core::Features::NativeCaller::InvokeNative(
-						0x015A522136D7F951ull, { local_handle, weapon_hash }, &ammo) && ammo > 0;
-
-				if (is_firearm)
-				{
-					uint64_t shooting = 0;
-					uint64_t attack_pressed = 0;
-
-					const bool firing =
-						(Core::Features::NativeCaller::InvokeNative(
-							0x34616828CD07F1A1ull, { local_handle }, &shooting) && shooting) ||
-						(Core::Features::NativeCaller::InvokeNative(
-							0xF3A21BCD95725A4Aull, { 0ull, 24ull }, &attack_pressed) && attack_pressed);
-
-					if (firing)
-					{
-						D3DXVECTOR3 cam{}, rot{};
-						if (Core::Features::NativeCaller::InvokeNativeVector3(
-								0x14D6F5678D8F1B37ull, {}, cam) &&
-							Core::Features::NativeCaller::InvokeNativeVector3(
-								0x837765A25378F0BBull, {}, rot))
-						{
-							last_extra_shot = now;
-
-							const float pitch = rot.x * 3.14159265f / 180.0f;
-							const float yaw = rot.z * 3.14159265f / 180.0f;
-
-							const D3DXVECTOR3 direction{
-								-std::sin(yaw) * std::cos(pitch),
-								std::cos(yaw) * std::cos(pitch),
-								std::sin(pitch)
-							};
-
-							// Start slightly ahead of the camera so the bullet never
-							// spawns inside the player's own ped.
-							const D3DXVECTOR3 start{
-								cam.x + direction.x * 0.75f,
-								cam.y + direction.y * 0.75f,
-								cam.z + direction.z * 0.75f
-							};
-
-							const D3DXVECTOR3 end{
-								cam.x + direction.x * 300.0f,
-								cam.y + direction.y * 300.0f,
-								cam.z + direction.z * 300.0f
-							};
-
-							// Match the equipped weapon's damage when possible.
-							uint32_t bullet_damage = 35;
-							{
-								auto* weapon_manager = local->GetWeaponManager();
-								auto* weapon_info = weapon_manager ? weapon_manager->GetWeaponInfo() : nullptr;
-								const uintptr_t info = reinterpret_cast<uintptr_t>(weapon_info);
-
-								if (info && Core::Features::NativeCaller::IsReadable(info + 0x120, 4))
-								{
-									const uint32_t raw = Mem.Read<uint32_t>(info + 0x120);
-									if (raw > 0 && raw < 5000)
-										bullet_damage = raw;
-								}
-							}
-
-							Core::Features::NativeCaller::InvokeNative(
-								0x867654CBC7606F2Cull, // SHOOT_SINGLE_BULLET_BETWEEN_COORDS
-								{
-									Core::Features::NativeCaller::FloatBits(start.x),
-									Core::Features::NativeCaller::FloatBits(start.y),
-									Core::Features::NativeCaller::FloatBits(start.z),
-									Core::Features::NativeCaller::FloatBits(end.x),
-									Core::Features::NativeCaller::FloatBits(end.y),
-									Core::Features::NativeCaller::FloatBits(end.z),
-									static_cast<uint64_t>(bullet_damage),
-									weapon_hash,
-									static_cast<uint64_t>(local_handle),
-									1ull,  // audible
-									0ull,  // visible tracer
-									0ull,  // not P2P
-									Core::Features::NativeCaller::FloatBits(100.0f) // speed
-								});
-						}
-					}
-				}
 			}
 		}
 

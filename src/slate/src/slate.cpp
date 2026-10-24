@@ -7598,25 +7598,17 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
 
         widgets->spacing(8 ds);
 
-        widgets->child.begin(I_MOOD__SILENCE, "Weather Override", 2, { world_width, 168 ds });
+        widgets->child.begin(I_CURRENT__LOCATION, "Override Status", 2, { world_width, 96 ds });
         {
-            if (widgets->checkbox(I_MOOD__SILENCE, "Enable Weather Override", &g_Config.Player->WeatherOverrideEnabled)) {
-                NotifyManager::Send(
-                    g_Config.Player->WeatherOverrideEnabled ? "Weather override enabled" : "Weather override disabled",
-                    220.0f);
-            }
-
-            widgets->selector("Weather", &g_Config.Player->WeatherOverrideIndex,
-                { "Extra Sunny", "Clear", "Clouds", "Overcast", "Rain", "Clearing",
-                  "Thunder", "Smog", "Foggy", "Xmas", "Snow", "Blizzard" });
-
-            widgets->spacing(4 ds);
-            TextDisabled("Weather addr: 0x%llX%s",
-                static_cast<unsigned long long>(Core::Features::World::g_weather_address),
-                Core::Features::World::g_weather_verified ? " (verified)" : " (unverified)");
-            TextDisabled("Clock addr: 0x%llX",
+            TextDisabled("Clock address: 0x%llX",
                 static_cast<unsigned long long>(Core::Features::World::g_clock_address));
-            TextDisabled("Servers that force their own weather will override this.");
+
+            if (g_Config.Player->TimeOverrideEnabled) {
+                TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "Time override is applying every frame.");
+            }
+            else {
+                TextDisabled("Enable the time override to apply it.");
+            }
         }
         widgets->child.end();
         });
