@@ -18,6 +18,33 @@ namespace Core::Features::World
 	inline bool g_scan_attempted = false;
 	inline std::atomic<bool> g_scan_started{ false };
 	inline std::atomic<bool> g_scan_done{ false };
+	inline bool g_weather_verified = false;
+
+	inline bool IsKnownWeatherHash(uint32_t value)
+	{
+		static const uint32_t known[] = {
+			0x97AA0A79, // EXTRASUNNY
+			0x36A83D84, // CLEAR
+			0x30FDAF5C, // CLOUDS
+			0xBB898D2D, // OVERCAST
+			0x54A69840, // RAIN
+			0x6DB1A50D, // CLEARING
+			0xB677829F, // THUNDER
+			0x10DCF4B5, // SMOG
+			0xAE737644, // FOGGY
+			0xAAC9C895, // XMAS
+			0xEFB6EFF6, // SNOW
+			0x27EA2814  // BLIZZARD
+		};
+
+		for (const uint32_t hash : known)
+		{
+			if (hash == value)
+				return true;
+		}
+
+		return false;
+	}
 
 	inline uintptr_t ResolveRip(uintptr_t instruction, int displacement_offset, int instruction_length)
 	{
@@ -88,6 +115,15 @@ namespace Core::Features::World
 						g_weather_next_address = second;
 				}
 			}
+		}
+
+		// A resolved weather address is only trusted when it already holds a
+		// real weather hash; that rules out a stray signature match.
+		if (g_weather_address &&
+			NativeCaller::IsReadable(g_weather_address, sizeof(uint32_t)) &&
+			IsKnownWeatherHash(Mem.Read<uint32_t>(g_weather_address)))
+		{
+			g_weather_verified = true;
 		}
 
 		// Clock: a global struct with hour/minute/second at +0x10/+0x14/+0x18.

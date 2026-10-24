@@ -486,6 +486,7 @@ namespace Core {
 			inline static bool ChaosUnusableVehicles;
 			inline static int ChaosSpamCount = 20;
 			inline static float ChaosRadius = 14.0f;
+			inline static float ChaosDestroyRadius = 25.0f;
 		} *Player;
 
 		nlohmann::json ImColToJson(const ImColor& Col) {
@@ -991,6 +992,7 @@ namespace Core {
 			PlayerCfg["ChaosUnusableVehicles"] = Player->ChaosUnusableVehicles;
 			PlayerCfg["ChaosSpamCount"] = Player->ChaosSpamCount;
 			PlayerCfg["ChaosRadius"] = Player->ChaosRadius;
+			PlayerCfg["ChaosDestroyRadius"] = Player->ChaosDestroyRadius;
 			PlayerCfg["VehicleRain"] = Player->VehicleRain;
 			PlayerCfg["HornetBoost"] = Player->HornetBoost;
 			PlayerCfg["VehicleJump"] = Player->VehicleJump;
@@ -1388,6 +1390,7 @@ namespace Core {
 				Player->ChaosUnusableVehicles = PlayerCfg.value("ChaosUnusableVehicles", Player->ChaosUnusableVehicles);
 				Player->ChaosSpamCount = PlayerCfg.value("ChaosSpamCount", Player->ChaosSpamCount);
 				Player->ChaosRadius = PlayerCfg.value("ChaosRadius", Player->ChaosRadius);
+				Player->ChaosDestroyRadius = PlayerCfg.value("ChaosDestroyRadius", Player->ChaosDestroyRadius);
 				Player->VehicleRain = PlayerCfg.value("VehicleRain", Player->VehicleRain);
 				Player->HornetBoost = PlayerCfg.value("HornetBoost", Player->HornetBoost);
 				Player->VehicleJump = PlayerCfg.value("VehicleJump", Player->VehicleJump);

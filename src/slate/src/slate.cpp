@@ -1,4 +1,4 @@
-#include <slate.h>
+﻿#include <slate.h>
 #include "../resources/fonts.h"
 #include "../resources/images.h"
 #include "../resources/sunketsware_logo.h"
@@ -13,6 +13,7 @@
 #include <Core/SDK/SDK.hpp>
 #include <Core/Features/NativeCaller.hpp>
 #include <Core/Features/Chaos.hpp>
+#include <Core/Features/World.hpp>
 #include "includes/includes.hpp"
 #include <Includes/CustomWidgets/Notify.hpp>
 #include <Includes/CustomWidgets/Preview.hpp>
@@ -3420,12 +3421,6 @@ namespace {
 
         Mem.Write<D3DXVECTOR3>(address + 0x320, velocity);
         queue_entity_velocity_hold(address, velocity, 500);
-
-        const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(address);
-        if (handle) {
-            Core::Features::NativeCaller::InvokeNative(
-                0xB128377056A54E2Aull, { handle, 0ull }); // SET_PED_CAN_RAGDOLL(false)
-        }
     }
 
     bool taze_ped(uintptr_t ped_address) {
@@ -3533,7 +3528,7 @@ namespace {
         }
 
         int affected = 0;
-        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 120.0f), 20)) {
             const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
             if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
@@ -3563,7 +3558,7 @@ namespace {
         }
 
         int affected = 0;
-        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 120.0f), 20)) {
             const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
             if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
@@ -3591,7 +3586,7 @@ namespace {
         }
 
         int affected = 0;
-        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 120.0f), 20)) {
             const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
             if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
@@ -3621,7 +3616,7 @@ namespace {
         }
 
         int affected = 0;
-        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 20)) {
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 120.0f), 20)) {
             const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
             if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
@@ -3664,7 +3659,7 @@ namespace {
         std::uniform_real_distribution<float> lateral(-10.0f, 10.0f);
 
         int affected = 0;
-        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 80.0f), 15)) {
+        for (CVehicle* vehicle : chaos_nearby_vehicles(std::clamp(radius, 5.0f, 120.0f), 15)) {
             const uintptr_t address = reinterpret_cast<uintptr_t>(vehicle);
             if (!Core::Features::Chaos::VehicleIsUsable(address)) {
                 continue;
@@ -3675,18 +3670,6 @@ namespace {
             Mem.Write<uint8_t>(address + 0x2E, 0);
             Mem.Write<D3DXVECTOR3>(address + 0x320, velocity);
             queue_entity_velocity_hold(address, velocity, 350);
-
-            const uint32_t handle = Core::Features::NativeCaller::PointerToHandle(address);
-            if (handle) {
-                Core::Features::NativeCaller::InvokeNative(
-                    0x1C99BB7B6E96D16Full, // SET_ENTITY_VELOCITY
-                    {
-                        handle,
-                        Core::Features::NativeCaller::FloatBits(velocity.x),
-                        Core::Features::NativeCaller::FloatBits(velocity.y),
-                        Core::Features::NativeCaller::FloatBits(velocity.z)
-                    });
-            }
 
             ++affected;
         }
@@ -7537,24 +7520,27 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                     PushStyleColor(ImGuiCol_ButtonHovered, g_style->col(pcol_scheme, 0.18f).vec4());
                     PushStyleColor(ImGuiCol_ButtonActive, g_style->col(pcol_scheme, 0.28f).vec4());
 
+                    widgets->sliderfloat(I_GRADIENTER, "Destruction Range", &g_Config.Player->ChaosDestroyRadius, 5.0f, 100.0f, "%.0fm");
+                    widgets->spacing(4 ds);
+
                     if (widgets->button("Destroy Cars", { button_width, 30 ds })) {
-                        chaos_destroy_cars(chaos_effect_radius);
+                        chaos_destroy_cars(g_Config.Player->ChaosDestroyRadius);
                     }
                     widgets->spacing(4 ds);
                     if (widgets->button("Freeze Cars", { button_width, 30 ds })) {
-                        chaos_freeze_cars(chaos_effect_radius);
+                        chaos_freeze_cars(g_Config.Player->ChaosDestroyRadius);
                     }
                     widgets->spacing(4 ds);
                     if (widgets->button("Void Cars", { button_width, 30 ds })) {
-                        chaos_void_cars(chaos_effect_radius);
+                        chaos_void_cars(g_Config.Player->ChaosDestroyRadius);
                     }
                     widgets->spacing(4 ds);
                     if (widgets->button("Flip Cars", { button_width, 30 ds })) {
-                        chaos_flip_cars(chaos_effect_radius);
+                        chaos_flip_cars(g_Config.Player->ChaosDestroyRadius);
                     }
                     widgets->spacing(4 ds);
                     if (widgets->button("Launch Cars", { button_width, 30 ds })) {
-                        chaos_launch_cars(chaos_effect_radius);
+                        chaos_launch_cars(g_Config.Player->ChaosDestroyRadius);
                     }
 
                     PopStyleColor(3);
@@ -7625,6 +7611,11 @@ void c_slate::initialize(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISw
                   "Thunder", "Smog", "Foggy", "Xmas", "Snow", "Blizzard" });
 
             widgets->spacing(4 ds);
+            TextDisabled("Weather addr: 0x%llX%s",
+                static_cast<unsigned long long>(Core::Features::World::g_weather_address),
+                Core::Features::World::g_weather_verified ? " (verified)" : " (unverified)");
+            TextDisabled("Clock addr: 0x%llX",
+                static_cast<unsigned long long>(Core::Features::World::g_clock_address));
             TextDisabled("Servers that force their own weather will override this.");
         }
         widgets->child.end();

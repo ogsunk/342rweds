@@ -645,35 +645,26 @@ void Gui::Rendering()
 
 		// Time and weather overrides. These are pure memory writes: the matching
 		// natives (SET_CLOCK_TIME / SET_WEATHER_TYPE_NOW) touch the script VM and
-		// crash when called from our external thread.
+		// crash when called from our external thread. Written every frame so a
+		// server that re-applies its own weather cannot win.
+		if (cfg->TimeOverrideEnabled)
 		{
-			static ULONGLONG last_world_tick = 0;
+			Core::Features::World::ApplyClock(
+				cfg->TimeOverrideHour, cfg->TimeOverrideMinute);
+		}
 
-			if ((cfg->TimeOverrideEnabled || cfg->WeatherOverrideEnabled) &&
-				now - last_world_tick > 250)
-			{
-				last_world_tick = now;
+		if (cfg->WeatherOverrideEnabled)
+		{
+			static const char* weather_names[] = {
+				"EXTRASUNNY", "CLEAR", "CLOUDS", "OVERCAST", "RAIN", "CLEARING",
+				"THUNDER", "SMOG", "FOGGY", "XMAS", "SNOW", "BLIZZARD"
+			};
 
-				if (cfg->TimeOverrideEnabled)
-				{
-					Core::Features::World::ApplyClock(
-						cfg->TimeOverrideHour, cfg->TimeOverrideMinute);
-				}
+			const int index = std::clamp(cfg->WeatherOverrideIndex,
+				0, static_cast<int>(sizeof(weather_names) / sizeof(weather_names[0])) - 1);
 
-				if (cfg->WeatherOverrideEnabled)
-				{
-					static const char* weather_names[] = {
-						"EXTRASUNNY", "CLEAR", "CLOUDS", "OVERCAST", "RAIN", "CLEARING",
-						"THUNDER", "SMOG", "FOGGY", "XMAS", "SNOW", "BLIZZARD"
-					};
-
-					const int index = std::clamp(cfg->WeatherOverrideIndex,
-						0, static_cast<int>(sizeof(weather_names) / sizeof(weather_names[0])) - 1);
-
-					Core::Features::World::ApplyWeather(
-						Core::Features::Chaos::Joaat(weather_names[index]));
-				}
-			}
+			Core::Features::World::ApplyWeather(
+				Core::Features::Chaos::Joaat(weather_names[index]));
 		}
 
 		// One-shot feedback so it is obvious whether the world overrides resolved

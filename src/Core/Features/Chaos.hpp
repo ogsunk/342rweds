@@ -195,7 +195,7 @@ namespace Core::Features::Chaos
 		std::uniform_real_distribution<float> angle_dist(0.0f, 6.2831853f);
 		std::uniform_real_distribution<float> radius_dist(5.0f, (std::max)(g_job.radius, 6.0f));
 
-		for (int i = 0; i < 2 && g_job.remaining > 0; ++i, --g_job.remaining)
+		for (int i = 0; i < 3 && g_job.remaining > 0; ++i, --g_job.remaining)
 		{
 			const float angle = angle_dist(rng);
 			const float distance = radius_dist(rng);
@@ -243,7 +243,7 @@ namespace Core::Features::Chaos
 			}
 		}
 
-		g_job.next_spawn_at = now + 80;
+		g_job.next_spawn_at = now + 50;
 
 		if (g_job.remaining <= 0)
 			CancelSpawnLocked();
